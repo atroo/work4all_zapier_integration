@@ -47,6 +47,8 @@ const perform = async (z, bundle) => {
     });
   };
 
+  var noteString = String(note);
+
   var createQuery = `
     mutation CreateShadowRe($memberCode: Int!) {
       createShadowRe(sdObjMemberCode: $memberCode) {
@@ -61,8 +63,8 @@ const perform = async (z, bundle) => {
   `;
 
   var modifyQuery = `
-    mutation ModifyShadowRe($shadowId: ID!, $note: String!) {
-      modifyShadowRe(id: $shadowId, invoiceData: { notiz: $note }) {
+    mutation ModifyShadowRe($shadowId: ID!, $invoiceData: InputEingangsrechnung!) {
+      modifyShadowRe(id: $shadowId, invoiceData: $invoiceData) {
         id
         name
         benutzerCode
@@ -86,12 +88,36 @@ const perform = async (z, bundle) => {
     }
   `;
 
+  var deleteShadowQuery = `
+    mutation DeleteShadowRe($shadowId: ID!) {
+      deleteShadowRe(id: $shadowId)
+    }
+  `;
+
+  var deleteQuery = `
+    mutation DeleteEntity(
+      $objectType: ObjectType!
+      $keys: [String]!
+      $recursive: Boolean
+    ) {
+      deleteEntity(objectType: $objectType, keys: $keys, recursive: $recursive) {
+        deletedRecords
+        errorMessages {
+          primaryKey
+          message
+          type
+          __typename
+        }
+        __typename
+      }
+    }
+  `;
+
+
   var parsedMemberCode = parseInt(memberCode, 10);
   if (Number.isNaN(parsedMemberCode)) {
     throw new Error('member_code must be an integer');
   }
-  var noteString = String(note);
-
   var createResult = await gql('CreateShadowRe', createQuery, {
     memberCode: parsedMemberCode,
   });
@@ -105,11 +131,19 @@ const perform = async (z, bundle) => {
 
   await gql('ModifyShadowRe', modifyQuery, {
     shadowId: String(shadowId),
-    note: noteString,
+    invoiceData: { notiz: noteString },
   });
   var persistResult = await gql('PersistShadowRe', persistQuery, {
     shadowId: String(shadowId),
   });
+
+  try {
+    await gql('DeleteShadowRe', deleteShadowQuery, {
+      shadowId: String(shadowId),
+    });
+  } catch (error) {
+    throw new Error('deleteShadowRe error: ' + error.message);
+  }
 
   return persistResult.persistShadowRe || persistResult;
 };
