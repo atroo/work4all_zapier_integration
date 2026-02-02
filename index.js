@@ -5,8 +5,7 @@ module.exports = {
   version: require('./package.json').version,
   platformVersion: require('zapier-platform-core').version,
   requestTemplate: {
-    params: { bearer_token: '{{bundle.authData.bearer_token}}' },
-    headers: { 'X-BEARER-TOKEN': '{{bundle.authData.bearer_token}}' },
+    headers: { Authorization: 'Bearer {{bundle.authData.bearer_token}}' },
   },
   authentication: authentication,
   creates: { [createInvoiceCreate.key]: createInvoiceCreate },

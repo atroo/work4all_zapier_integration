@@ -3,12 +3,10 @@ const test = async (z, bundle) => {
     url: 'https://backend-dev.work4alltest.work4allcloud.de/graphql',
     method: 'POST',
     headers: {
-      'X-BEARER-TOKEN': bundle.authData.bearer_token,
-      Authorization: bundle.authData.bearer_token,
+      Authorization: `Bearer ${bundle.authData.bearer_token}`,
       'GraphQL-Require-Preflight': 'true',
       'Content-Type': 'application/json',
     },
-    params: {},
     body: JSON.stringify({
       query: 'query { __typename }',
       // operationName: 'TestAuth',     // optional

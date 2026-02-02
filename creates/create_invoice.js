@@ -48,7 +48,7 @@ const perform = async (z, bundle) => {
   };
 
   var createQuery = `
-    mutation CreateShadowRe($memberCode: String!) {
+    mutation CreateShadowRe($memberCode: Int!) {
       createShadowRe(sdObjMemberCode: $memberCode) {
         id
         name
@@ -61,8 +61,8 @@ const perform = async (z, bundle) => {
   `;
 
   var modifyQuery = `
-    mutation ModifyShadowRe($memberCode: String!, $note: String!) {
-      modifyShadowRe(id: $memberCode, invoiceData: { notiz: $note }) {
+    mutation ModifyShadowRe($shadowId: ID!, $note: String!) {
+      modifyShadowRe(id: $shadowId, invoiceData: { notiz: $note }) {
         id
         name
         benutzerCode
@@ -74,8 +74,8 @@ const perform = async (z, bundle) => {
   `;
 
   var persistQuery = `
-    mutation PersistShadowRe($memberCode: String!) {
-      persistShadowRe(id: $memberCode) {
+    mutation PersistShadowRe($shadowId: ID!) {
+      persistShadowRe(id: $shadowId) {
         id
         name
         benutzerCode
@@ -86,12 +86,29 @@ const perform = async (z, bundle) => {
     }
   `;
 
-  var variables = { memberCode: String(memberCode), note: String(note) };
+  var parsedMemberCode = parseInt(memberCode, 10);
+  if (Number.isNaN(parsedMemberCode)) {
+    throw new Error('member_code must be an integer');
+  }
+  var noteString = String(note);
 
-  await gql('CreateShadowRe', createQuery, { memberCode: variables.memberCode });
-  await gql('ModifyShadowRe', modifyQuery, variables);
+  var createResult = await gql('CreateShadowRe', createQuery, {
+    memberCode: parsedMemberCode,
+  });
+  var shadowId =
+    createResult &&
+    createResult.createShadowRe &&
+    createResult.createShadowRe.id;
+  if (!shadowId) {
+    throw new Error('createShadowRe did not return an id');
+  }
+
+  await gql('ModifyShadowRe', modifyQuery, {
+    shadowId: String(shadowId),
+    note: noteString,
+  });
   var persistResult = await gql('PersistShadowRe', persistQuery, {
-    memberCode: variables.memberCode,
+    shadowId: String(shadowId),
   });
 
   return persistResult.persistShadowRe || persistResult;
