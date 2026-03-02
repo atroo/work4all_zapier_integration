@@ -1,3 +1,7 @@
+const fs = require('fs');
+const http = require('http');
+const path = require('path');
+
 const zapier = require('zapier-platform-core');
 
 const App = require('../../index');
@@ -5,6 +9,8 @@ const appTester = zapier.createAppTester(App);
 zapier.tools.env.inject();
 
 const perform = App.creates['create_invoice'].operation.perform;
+
+const RECEIPTS_DIR = path.join(__dirname, '../../data/receipts');
 
 // Use WORK4ALL_SUPPLIER_CODE if set, otherwise fall back to WORK4ALL_MEMBER_CODE,
 // otherwise use the known-good supplier from the backend developer's sample.
@@ -14,6 +20,9 @@ const SUPPLIER_CODE =
   process.env.WORK4ALL_SUPPLIER_CODE ||
   process.env.WORK4ALL_MEMBER_CODE ||
   '1245558295';
+
+// Use today's date so test invoices are easy to find and delete in work4all.
+const TODAY = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
 
 // Full header payload from the backend developer's sample.
 // invoiceItems uses an empty array because specific account/taxCode values
@@ -26,9 +35,9 @@ const FULL_INPUT = {
   project_code: '1610906012',
   note: 'Eingangsrechnungs-Notiz',
   invoice_number_supplier: 'xy1234-4022',
-  invoice_date: '2026-02-13T00:00:00Z',
-  entry_date: '2026-02-16T00:00:00Z',
-  receipt_date: '2026-02-17T00:00:00Z',
+  invoice_date: TODAY,
+  entry_date: TODAY,
+  receipt_date: TODAY,
   payment_term_days: '11',
   discount1_rate: '2',
   discount1_days: '8',
@@ -85,19 +94,16 @@ describe('creates.create_invoice – input validation', () => {
     ).rejects.toThrow('invoice_items must be a JSON array');
   });
 
-  it('throws when receipts_add is not valid JSON', async () => {
-    await expect(
-      appTester(perform, makeBundle({ supplier_code: '123', receipts_add: '{broken' })),
-    ).rejects.toThrow('receipts_add must be a valid JSON array');
-  });
-
-  it('throws when receipts_add is a JSON object instead of array', async () => {
+  it('throws when a receipt_file_url is unreachable', async () => {
     await expect(
       appTester(
         perform,
-        makeBundle({ supplier_code: '123', receipts_add: '{"tempFileId":"abc"}' }),
+        makeBundle({
+          supplier_code: '123',
+          receipt_file_urls: ['https://invalid.example.invalid/file.pdf'],
+        }),
       ),
-    ).rejects.toThrow('receipts_add must be a JSON array');
+    ).rejects.toThrow();
   });
 
   it('throws when project_code is not a valid integer', async () => {
@@ -111,12 +117,44 @@ describe('creates.create_invoice – input validation', () => {
 // API integration tests — require real credentials and network access
 // ---------------------------------------------------------------------------
 describe('creates.create_invoice – API integration', () => {
-  beforeAll(() => {
+  // Local HTTP server that serves files from data/receipts/ so the perform
+  // function can download them via URL (as it would in a real Zapier zap).
+  let fileServer;
+  let fileServerPort;
+
+  beforeAll(async () => {
     if (!process.env.WORK4ALL_BEARER_TOKEN) {
       throw new Error('WORK4ALL_BEARER_TOKEN is required to run integration tests.');
     }
     if (!process.env.WORK4ALL_MEMBER_CODE) {
       throw new Error('WORK4ALL_MEMBER_CODE is required to run integration tests.');
+    }
+
+    await new Promise((resolve) => {
+      fileServer = http.createServer((req, res) => {
+        const filename = decodeURIComponent(req.url.slice(1));
+        const filePath = path.join(RECEIPTS_DIR, filename);
+        try {
+          const data = fs.readFileSync(filePath);
+          const ext = path.extname(filename).toLowerCase();
+          const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/octet-stream';
+          res.writeHead(200, { 'Content-Type': mimeType, 'Content-Length': data.length });
+          res.end(data);
+        } catch {
+          res.writeHead(404);
+          res.end('Not found');
+        }
+      });
+      fileServer.listen(0, '127.0.0.1', () => {
+        fileServerPort = fileServer.address().port;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(async () => {
+    if (fileServer) {
+      await new Promise((resolve) => fileServer.close(resolve));
     }
   });
 
@@ -185,6 +223,34 @@ describe('creates.create_invoice – API integration', () => {
     expect(result.code).toBeGreaterThan(0);
     expect(Array.isArray(result.buchungen)).toBe(true);
   }, 15000);
+
+  it('creates invoice with receipt files from data/receipts/ attached', async () => {
+    const files = fs.readdirSync(RECEIPTS_DIR).filter((f) => !f.startsWith('.'));
+    expect(files.length).toBeGreaterThan(0);
+
+    const fileUrls = files.map(
+      (f) => `http://127.0.0.1:${fileServerPort}/${encodeURIComponent(f)}`,
+    );
+
+    const result = await appTester(
+      perform,
+      makeBundle({
+        supplier_code: SUPPLIER_CODE,
+        note: `Receipt-upload test (${files.length} file(s))`,
+        invoice_items: '[]',
+        invoice_date: TODAY,
+        entry_date: TODAY,
+        receipt_date: TODAY,
+        receipt_file_urls: fileUrls,
+      }),
+    );
+
+    expect(result.code).toBeGreaterThan(0);
+    expect(result.sDObjMemberCode).toBe(parseInt(SUPPLIER_CODE, 10));
+    // If the upload or the mutation failed, the perform function would have
+    // thrown — reaching this assertion means all files were uploaded and
+    // linked to the invoice successfully.
+  }, 60000);
 
   it('returns all expected output field keys', async () => {
     const result = await appTester(

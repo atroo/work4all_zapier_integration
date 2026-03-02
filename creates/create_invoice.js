@@ -69,28 +69,59 @@ const perform = async (z, bundle) => {
   }
 
   var receipts;
-  if (bundle.inputData.receipts_add != null) {
-    var rawReceipts = bundle.inputData.receipts_add;
-    var parsedReceipts;
-    try {
-      parsedReceipts =
-        typeof rawReceipts === 'string' ? JSON.parse(rawReceipts) : rawReceipts;
-    } catch (e) {
-      throw new Error(
-        'receipts_add must be a valid JSON array of attachment objects. ' + e.message,
-      );
+  if (bundle.inputData.receipt_file_urls != null) {
+    var fileUrls = Array.isArray(bundle.inputData.receipt_file_urls)
+      ? bundle.inputData.receipt_file_urls
+      : [bundle.inputData.receipt_file_urls];
+
+    fileUrls = fileUrls.map(function (u) { return String(u).trim(); }).filter(Boolean);
+
+    if (fileUrls.length > 0) {
+      var fileUploadUrl =
+        endpoint.replace('/graphql', '') + '/api/file?type=TempDatei';
+
+      var uploadedFiles = [];
+      for (var fi = 0; fi < fileUrls.length; fi++) {
+        var fileUrl = fileUrls[fi];
+
+        // Download the file as raw binary
+        var fileResp = await z.request({ url: fileUrl, raw: true });
+        var fileBuffer = Buffer.from(await fileResp.arrayBuffer());
+
+        // Derive a filename from the URL path (strip query string)
+        var urlPath = fileUrl.split('?')[0];
+        var filename = urlPath.split('/').pop() || 'attachment';
+
+        // Upload to work4all as TempDatei using multipart/form-data
+        var form = new FormData();
+        form.append('myFile', new Blob([fileBuffer]), filename);
+
+        var uploadResponse = await fetch(fileUploadUrl, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + bundle.authData.bearer_token },
+          body: form,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(
+            'File upload failed for "' + filename + '" (HTTP ' + uploadResponse.status + ')',
+          );
+        }
+
+        var uploadJson = await uploadResponse.json();
+
+        if (!uploadJson.fileStored || !uploadJson.generatedObject) {
+          throw new Error(
+            'File upload rejected for "' + filename + '": ' +
+              (uploadJson.errorMessage || JSON.stringify(uploadJson)),
+          );
+        }
+
+        uploadedFiles.push({ tempFileId: String(uploadJson.generatedObject) });
+      }
+
+      receipts = { add: uploadedFiles };
     }
-    if (!Array.isArray(parsedReceipts)) {
-      throw new Error('receipts_add must be a JSON array.');
-    }
-    receipts = {
-      add: parsedReceipts.map(function (r) {
-        var att = { tempFileId: String(r.tempFileId) };
-        if (r.name != null) att.name = String(r.name);
-        if (r.invoiceJustifying != null) att.invoiceJustifying = Boolean(r.invoiceJustifying);
-        return att;
-      }),
-    };
   }
 
   var mutation = `
@@ -385,16 +416,15 @@ module.exports = {
         altersDynamicFields: false,
       },
       {
-        key: 'receipts_add',
-        label: 'Attachments (JSON)',
+        key: 'receipt_file_urls',
+        label: 'Receipt File URLs',
         helpText:
-          'Optional list of file attachments to link to the invoice, as a JSON array. ' +
-          'Each item must contain tempFileId (String) and may contain name (String) and ' +
-          'invoiceJustifying (Boolean, marks the file as the invoice document). ' +
-          'Example: [{"tempFileId":"23bb2060-721f-4ebd-9ab2-760ae8f40615","invoiceJustifying":true}]',
-        type: 'text',
+          'One or more URLs of files to attach to the invoice (e.g. a PDF from a previous ' +
+          'step). Each file is automatically uploaded to work4all and linked as a receipt ' +
+          'attachment. You can map multiple values using Zapier line items.',
+        type: 'string',
         required: false,
-        list: false,
+        list: true,
         altersDynamicFields: false,
       },
     ],
