@@ -160,24 +160,45 @@ const perform = async (z, bundle) => {
       for (var fi = 0; fi < fileUrls.length; fi++) {
         var fileUrl = fileUrls[fi];
 
-        // Download the file as raw binary.
-        // Use native fetch (not z.request) so no Authorization header is added —
-        // pre-signed S3 URLs are self-authenticating and reject extra auth headers.
+        // Download the file using native fetch (not z.request) so no Authorization
+        // header is added — pre-signed S3 URLs are self-authenticating and S3 rejects
+        // requests that carry an extra Authorization header.
         var fileResp = await fetch(fileUrl);
         if (!fileResp.ok) {
           throw new Error(
             'Failed to download file "' + fileUrl + '" (HTTP ' + fileResp.status + ')',
           );
         }
-        var fileBuffer = Buffer.from(await fileResp.arrayBuffer());
 
-        // Derive a filename from the URL path (strip query string)
-        var urlPath = fileUrl.split('?')[0];
-        var filename = urlPath.split('/').pop() || 'attachment';
+        // Resolve the filename: prefer Content-Disposition (Zapier S3 sets this to the
+        // original filename), fall back to the URL path segment, then add the correct
+        // extension from Content-Type when the path segment has none.
+        var filename = '';
+        var contentDisposition = fileResp.headers.get('content-disposition') || '';
+        var cdMatch = contentDisposition.match(/filename[^;=\n]*=(?:(['"])([^'"]*)\1|([^;\n]*))/);
+        if (cdMatch) {
+          filename = (cdMatch[2] || cdMatch[3] || '').trim();
+        }
+        if (!filename) {
+          var urlPath = fileUrl.split('?')[0];
+          filename = urlPath.split('/').pop() || 'attachment';
+        }
+        if (!filename.includes('.')) {
+          var ct = fileResp.headers.get('content-type') || '';
+          if (ct.includes('pdf')) filename += '.pdf';
+          else if (ct.includes('xml')) filename += '.xml';
+          else if (ct.includes('jpeg') || ct.includes('jpg')) filename += '.jpg';
+          else if (ct.includes('png')) filename += '.png';
+        }
+
+        // Read the response as a Blob — this preserves the server's MIME type and
+        // avoids the Buffer→Blob conversion that can produce an empty body in some
+        // Lambda Node.js builds.
+        var fileBlob = await fileResp.blob();
 
         // Upload to work4all as TempDatei using multipart/form-data
         var form = new FormData();
-        form.append('myFile', new Blob([fileBuffer]), filename);
+        form.append('myFile', fileBlob, filename);
 
         var uploadResponse = await fetch(fileUploadUrl, {
           method: 'POST',
