@@ -38,34 +38,34 @@ const perform = async (z, bundle) => {
   if (bundle.inputData.currency_code != null)
     input.currencyCode = parseInt(bundle.inputData.currency_code, 10);
 
-  if (bundle.inputData.invoice_items != null) {
-    var rawItems = bundle.inputData.invoice_items;
-    var parsedItems;
-    try {
-      parsedItems = typeof rawItems === 'string' ? JSON.parse(rawItems) : rawItems;
-    } catch (e) {
-      throw new Error(
-        'invoice_items must be a valid JSON array of position objects. ' + e.message,
-      );
-    }
-    if (!Array.isArray(parsedItems)) {
-      throw new Error('invoice_items must be a JSON array.');
-    }
-    input.invoiceItems = parsedItems.map(function (item) {
-      var pos = {};
-      if (item.account != null) pos.account = parseInt(item.account, 10);
-      if (item.costCenter != null) pos.costCenter = parseInt(item.costCenter, 10);
-      if (item.costGroup != null) pos.costGroup = parseInt(item.costGroup, 10);
-      if (item.projectCode != null) pos.projectCode = parseInt(item.projectCode, 10);
-      if (item.taxCode != null) pos.taxCode = parseInt(item.taxCode, 10);
-      if (item.taxRate != null) pos.taxRate = parseFloat(item.taxRate);
-      if (item.netAmount != null) pos.netAmount = parseFloat(item.netAmount);
-      if (item.grossAmount != null) pos.grossAmount = parseFloat(item.grossAmount);
-      if (item.vatAmount != null) pos.vatAmount = parseFloat(item.vatAmount);
-      if (item.note != null) pos.note = String(item.note);
-      return pos;
-    });
+  // The work4all backend throws NullReferenceException when invoiceItems is
+  // omitted from the mutation, so we always send at least an empty array.
+  var rawItems = bundle.inputData.invoice_items != null ? bundle.inputData.invoice_items : [];
+  var parsedItems;
+  try {
+    parsedItems = typeof rawItems === 'string' ? JSON.parse(rawItems) : rawItems;
+  } catch (e) {
+    throw new Error(
+      'invoice_items must be a valid JSON array of position objects. ' + e.message,
+    );
   }
+  if (!Array.isArray(parsedItems)) {
+    throw new Error('invoice_items must be a JSON array.');
+  }
+  input.invoiceItems = parsedItems.map(function (item) {
+    var pos = {};
+    if (item.account != null) pos.account = parseInt(item.account, 10);
+    if (item.costCenter != null) pos.costCenter = parseInt(item.costCenter, 10);
+    if (item.costGroup != null) pos.costGroup = parseInt(item.costGroup, 10);
+    if (item.projectCode != null) pos.projectCode = parseInt(item.projectCode, 10);
+    if (item.taxCode != null) pos.taxCode = parseInt(item.taxCode, 10);
+    if (item.taxRate != null) pos.taxRate = parseFloat(item.taxRate);
+    if (item.netAmount != null) pos.netAmount = parseFloat(item.netAmount);
+    if (item.grossAmount != null) pos.grossAmount = parseFloat(item.grossAmount);
+    if (item.vatAmount != null) pos.vatAmount = parseFloat(item.vatAmount);
+    if (item.note != null) pos.note = String(item.note);
+    return pos;
+  });
 
   // ── Supplier lookup: resolve nummer/name → internal supplierCode ──────────
   // The work4all API does not support server-side filtering or pagination with
