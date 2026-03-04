@@ -84,8 +84,15 @@ const perform = async (z, bundle) => {
       for (var fi = 0; fi < fileUrls.length; fi++) {
         var fileUrl = fileUrls[fi];
 
-        // Download the file as raw binary
-        var fileResp = await z.request({ url: fileUrl, raw: true });
+        // Download the file as raw binary.
+        // Use native fetch (not z.request) so no Authorization header is added —
+        // pre-signed S3 URLs are self-authenticating and reject extra auth headers.
+        var fileResp = await fetch(fileUrl);
+        if (!fileResp.ok) {
+          throw new Error(
+            'Failed to download file "' + fileUrl + '" (HTTP ' + fileResp.status + ')',
+          );
+        }
         var fileBuffer = Buffer.from(await fileResp.arrayBuffer());
 
         // Derive a filename from the URL path (strip query string)
