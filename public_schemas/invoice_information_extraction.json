@@ -8,9 +8,9 @@
             "type": "number",
             "description": "The total amount of the invoice"
         },
-        "customer_number": {
+        "supplier_number": {
             "type": "string",
-            "description": "The customer number associated with the invoice"
+            "description": "The supplier number associated with the invoice"
         },
         "contract_number": {
             "type": "string",
@@ -19,7 +19,7 @@
     },
     "required": [
         "invoice_amount",
-        "customer_number",
+        "supplier_number",
         "contract_number"
     ],
     "additionalProperties": false
