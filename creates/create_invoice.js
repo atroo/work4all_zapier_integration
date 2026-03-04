@@ -1,16 +1,15 @@
 const perform = async (z, bundle) => {
   var endpoint = 'https://backend-dev.work4alltest.work4allcloud.de/graphql';
 
-  var supplierCode = bundle.inputData.supplier_code;
-  if (supplierCode === undefined || supplierCode === null) {
-    throw new Error('supplier_code is required');
-  }
-  var parsedSupplierCode = parseInt(supplierCode, 10);
-  if (Number.isNaN(parsedSupplierCode)) {
-    throw new Error('supplier_code must be an integer');
+  var supplierNumber = bundle.inputData.supplier_number;
+  var supplierName = bundle.inputData.supplier_name;
+
+  if (supplierNumber == null && supplierName == null) {
+    throw new Error('Either supplier_number or supplier_name is required');
   }
 
-  var input = { supplierCode: parsedSupplierCode };
+  // ── Build input (pure validation — no API calls) ───────────────────────────
+  var input = {};
 
   if (bundle.inputData.note != null) input.note = String(bundle.inputData.note);
   if (bundle.inputData.project_code != null) {
@@ -67,6 +66,83 @@ const perform = async (z, bundle) => {
       return pos;
     });
   }
+
+  // ── Supplier lookup: resolve nummer/name → internal supplierCode ──────────
+  // The work4all API does not support server-side filtering or pagination with
+  // the current token permissions — queryPage, filter, and sort are all blocked.
+  // We fetch up to SUPPLIER_PAGE_SIZE records and search client-side. If the
+  // tenant has more suppliers than this limit, we surface a clear error instead
+  // of silently returning a wrong result.
+  var SUPPLIER_PAGE_SIZE = 500;
+
+  var supplierResp = await z.request({
+    url: endpoint,
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + bundle.authData.bearer_token,
+      'GraphQL-Require-Preflight': 'true',
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      query: '{ getLieferanten(querySize: ' + SUPPLIER_PAGE_SIZE + ') { total data { code nummer name firma1 } } }',
+    }),
+  });
+
+  var supplierJson = supplierResp.json || JSON.parse(supplierResp.content);
+  if (supplierJson.errors && supplierJson.errors.length) {
+    throw new Error(
+      'Failed to fetch suppliers: ' +
+        supplierJson.errors.map(function (e) { return e.message; }).join('; '),
+    );
+  }
+
+  var supplierPage = supplierJson.data.getLieferanten;
+  var suppliers = supplierPage.data;
+
+  if (supplierPage.total > SUPPLIER_PAGE_SIZE) {
+    throw new Error(
+      'Your work4all instance has ' + supplierPage.total + ' suppliers, but the API only ' +
+        'allows fetching ' + SUPPLIER_PAGE_SIZE + ' at a time without server-side filtering. ' +
+        'Please contact work4all support to enable the queryPage or filter capabilities ' +
+        'for your API token, or provide the supplier_id directly.',
+    );
+  }
+
+  var foundSupplier = null;
+
+  // 1st: match by supplier number (Lieferant.nummer)
+  if (supplierNumber != null) {
+    var parsedNum = parseInt(String(supplierNumber).trim(), 10);
+    if (!Number.isNaN(parsedNum)) {
+      foundSupplier = suppliers.find(function (s) { return s.nummer === parsedNum; }) || null;
+    }
+  }
+
+  // 2nd: fallback — case-insensitive substring match on firma1 or name
+  if (!foundSupplier && supplierName != null) {
+    var nameLower = String(supplierName).toLowerCase();
+    foundSupplier =
+      suppliers.find(function (s) {
+        return (
+          (s.firma1 && s.firma1.toLowerCase().includes(nameLower)) ||
+          (s.name && s.name.toLowerCase().includes(nameLower))
+        );
+      }) || null;
+  }
+
+  if (!foundSupplier) {
+    var searchDesc =
+      supplierNumber != null
+        ? 'supplier_number=' + supplierNumber
+        : 'supplier_name=' + supplierName;
+    throw new Error(
+      'No supplier found for ' + searchDesc + '. ' +
+        'Please verify the supplier number or name in work4all.',
+    );
+  }
+
+  input.supplierCode = foundSupplier.code;
 
   var receipts;
   if (bundle.inputData.receipt_file_urls != null) {
@@ -267,7 +343,7 @@ module.exports = {
       { key: 'eingangsDatum', label: 'Receipt Date', type: 'datetime' },
       { key: 'faelligDatum', label: 'Due Date', type: 'datetime' },
       { key: 'notiz', label: 'Note', type: 'string' },
-      { key: 'sDObjMemberCode', label: 'Supplier Code', type: 'integer' },
+      { key: 'sDObjMemberCode', label: 'Supplier Internal Code', type: 'integer' },
       { key: 'projektCode', label: 'Project Code', type: 'integer' },
       { key: 'rBetrag', label: 'Invoice Amount (Gross)', type: 'number' },
       { key: 'rMwst', label: 'VAT Amount', type: 'number' },
@@ -292,11 +368,24 @@ module.exports = {
     ],
     inputFields: [
       {
-        key: 'supplier_code',
-        label: 'Supplier Code',
-        helpText: 'The member/supplier code for which the invoice is created.',
+        key: 'supplier_number',
+        label: 'Supplier Number',
+        helpText:
+          'The human-readable supplier number (Lieferantennummer) as shown in work4all. ' +
+          'The integration looks up the internal supplier ID automatically.',
         type: 'integer',
-        required: true,
+        required: false,
+        list: false,
+        altersDynamicFields: false,
+      },
+      {
+        key: 'supplier_name',
+        label: 'Supplier Name (Fallback)',
+        helpText:
+          'Company name of the supplier. Used as a fallback if no match is found by ' +
+          'Supplier Number. Case-insensitive substring match against firma1 and name.',
+        type: 'string',
+        required: false,
         list: false,
         altersDynamicFields: false,
       },

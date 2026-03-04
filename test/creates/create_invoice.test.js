@@ -12,14 +12,10 @@ const perform = App.creates['create_invoice'].operation.perform;
 
 const RECEIPTS_DIR = path.join(__dirname, '../../data/receipts');
 
-// Use WORK4ALL_SUPPLIER_CODE if set, otherwise fall back to WORK4ALL_MEMBER_CODE,
-// otherwise use the known-good supplier from the backend developer's sample.
-// NOTE: the supplier must exist as a Lieferant in the work4all test instance —
-// a plain member/contact code will cause a ValidationError.
-const SUPPLIER_CODE =
-  process.env.WORK4ALL_SUPPLIER_CODE ||
-  process.env.WORK4ALL_MEMBER_CODE ||
-  '1245558295';
+// Human-readable supplier number (Lieferant.nummer) — the integration looks up
+// the internal code automatically. Use WORK4ALL_SUPPLIER_NUMBER if set, otherwise
+// fall back to the known-good test supplier (nummer=70361, firma1="TO Test").
+const SUPPLIER_NUMBER = process.env.WORK4ALL_SUPPLIER_NUMBER || '70361';
 
 // Use today's date so test invoices are easy to find and delete in work4all.
 const TODAY = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
@@ -31,7 +27,7 @@ const TODAY = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
 // Provide WORK4ALL_INVOICE_ITEMS in .env with a JSON array of valid positions
 // to test line-item creation in your specific environment.
 const FULL_INPUT = {
-  supplier_code: SUPPLIER_CODE,
+  supplier_number: SUPPLIER_NUMBER,
   project_code: '1610906012',
   note: 'Eingangsrechnungs-Notiz',
   invoice_number_supplier: 'xy1234-4022',
@@ -58,40 +54,43 @@ function makeBundle(inputData) {
 // Input validation tests — these throw before any HTTP call is made
 // ---------------------------------------------------------------------------
 describe('creates.create_invoice – input validation', () => {
-  it('throws when supplier_code is missing', async () => {
+  it('throws when both supplier_number and supplier_name are missing', async () => {
     await expect(
       appTester(perform, makeBundle({ note: 'test' })),
-    ).rejects.toThrow('supplier_code is required');
+    ).rejects.toThrow('Either supplier_number or supplier_name is required');
   });
 
-  it('throws when supplier_code is null', async () => {
+  it('throws when both supplier_number and supplier_name are null', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_code: null })),
-    ).rejects.toThrow('supplier_code is required');
-  });
-
-  it('throws when supplier_code is not a valid integer', async () => {
-    await expect(
-      appTester(perform, makeBundle({ supplier_code: 'not-a-number' })),
-    ).rejects.toThrow('supplier_code must be an integer');
+      appTester(perform, makeBundle({ supplier_number: null, supplier_name: null })),
+    ).rejects.toThrow('Either supplier_number or supplier_name is required');
   });
 
   it('throws when invoice_items is not valid JSON', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_code: '123', invoice_items: '{broken json' })),
+      appTester(perform, makeBundle({ supplier_number: '70361', invoice_items: '{broken json' })),
     ).rejects.toThrow('invoice_items must be a valid JSON array');
   });
 
   it('throws when invoice_items is a JSON object instead of array', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_code: '123', invoice_items: '{"account":1}' })),
+      appTester(perform, makeBundle({ supplier_number: '70361', invoice_items: '{"account":1}' })),
     ).rejects.toThrow('invoice_items must be a JSON array');
   });
 
   it('throws when invoice_items is a JSON string instead of array', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_code: '123', invoice_items: '"just a string"' })),
+      appTester(
+        perform,
+        makeBundle({ supplier_number: '70361', invoice_items: '"just a string"' }),
+      ),
     ).rejects.toThrow('invoice_items must be a JSON array');
+  });
+
+  it('throws when project_code is not a valid integer', async () => {
+    await expect(
+      appTester(perform, makeBundle({ supplier_number: '70361', project_code: 'bad' })),
+    ).rejects.toThrow('project_code must be an integer');
   });
 
   it('throws when a receipt_file_url is unreachable', async () => {
@@ -99,17 +98,11 @@ describe('creates.create_invoice – input validation', () => {
       appTester(
         perform,
         makeBundle({
-          supplier_code: '123',
+          supplier_number: SUPPLIER_NUMBER,
           receipt_file_urls: ['https://invalid.example.invalid/file.pdf'],
         }),
       ),
     ).rejects.toThrow();
-  });
-
-  it('throws when project_code is not a valid integer', async () => {
-    await expect(
-      appTester(perform, makeBundle({ supplier_code: '123', project_code: 'bad' })),
-    ).rejects.toThrow('project_code must be an integer');
   });
 });
 
@@ -125,9 +118,6 @@ describe('creates.create_invoice – API integration', () => {
   beforeAll(async () => {
     if (!process.env.WORK4ALL_BEARER_TOKEN) {
       throw new Error('WORK4ALL_BEARER_TOKEN is required to run integration tests.');
-    }
-    if (!process.env.WORK4ALL_MEMBER_CODE) {
-      throw new Error('WORK4ALL_MEMBER_CODE is required to run integration tests.');
     }
 
     await new Promise((resolve) => {
@@ -165,8 +155,9 @@ describe('creates.create_invoice – API integration', () => {
     expect(typeof result.code).toBe('number');
     expect(result.code).toBeGreaterThan(0);
 
-    // Supplier echoed back
-    expect(result.sDObjMemberCode).toBe(parseInt(FULL_INPUT.supplier_code, 10));
+    // Supplier internal code echoed back (resolved from supplier_number)
+    expect(typeof result.sDObjMemberCode).toBe('number');
+    expect(result.sDObjMemberCode).toBeGreaterThan(0);
 
     // Note preserved
     expect(result.notiz).toBe(FULL_INPUT.note);
@@ -214,7 +205,7 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_code: SUPPLIER_CODE,
+        supplier_number: SUPPLIER_NUMBER,
         note: 'Array passthrough test',
         invoice_items: [],
       }),
@@ -235,7 +226,7 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_code: SUPPLIER_CODE,
+        supplier_number: SUPPLIER_NUMBER,
         note: `Receipt-upload test (${files.length} file(s))`,
         invoice_items: '[]',
         invoice_date: TODAY,
@@ -246,7 +237,7 @@ describe('creates.create_invoice – API integration', () => {
     );
 
     expect(result.code).toBeGreaterThan(0);
-    expect(result.sDObjMemberCode).toBe(parseInt(SUPPLIER_CODE, 10));
+    expect(result.sDObjMemberCode).toBeGreaterThan(0);
     // If the upload or the mutation failed, the perform function would have
     // thrown — reaching this assertion means all files were uploaded and
     // linked to the invoice successfully.
@@ -256,7 +247,7 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_code: SUPPLIER_CODE,
+        supplier_number: SUPPLIER_NUMBER,
         note: 'Output field shape test',
         invoice_items: '[]',
       }),
