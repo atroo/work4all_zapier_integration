@@ -243,6 +243,30 @@ describe('creates.create_invoice – API integration', () => {
     // linked to the invoice successfully.
   }, 60000);
 
+  it('extracts a ZIP and uploads each contained file individually', async () => {
+    const zipPath = path.join(RECEIPTS_DIR, 'Invoice.zip');
+    expect(fs.existsSync(zipPath)).toBe(true);
+
+    const result = await appTester(
+      perform,
+      makeBundle({
+        supplier_number: SUPPLIER_NUMBER,
+        note: 'ZIP extraction test',
+        invoice_items: '[]',
+        invoice_date: TODAY,
+        entry_date: TODAY,
+        receipt_date: TODAY,
+        receipt_file_urls: [
+          `http://127.0.0.1:${fileServerPort}/${encodeURIComponent('Invoice.zip')}`,
+        ],
+      }),
+    );
+
+    expect(result.code).toBeGreaterThan(0);
+    // If any file upload inside the ZIP failed, perform() would have thrown
+    // before reaching this assertion.
+  }, 60000);
+
   it('returns all expected output field keys', async () => {
     const result = await appTester(
       perform,

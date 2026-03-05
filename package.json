@@ -11,6 +11,7 @@
     "npm": ">=5.6.0"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
     "zapier-platform-core": "18.1.0"
   },
   "devDependencies": {

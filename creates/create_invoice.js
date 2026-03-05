@@ -1,3 +1,5 @@
+const JSZip = require('jszip');
+
 const perform = async (z, bundle) => {
   var endpoint = 'https://backend-dev.work4alltest.work4allcloud.de/graphql';
 
@@ -156,12 +158,36 @@ const perform = async (z, bundle) => {
       var fileUploadUrl =
         endpoint.replace('/graphql', '') + '/api/file?type=TempDatei';
 
+      // Uploads a single Blob to work4all and returns { tempFileId }.
+      async function uploadBlob(blob, name) {
+        var form = new FormData();
+        form.append('myFile', blob, name);
+        var uploadResponse = await fetch(fileUploadUrl, {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + bundle.authData.bearer_token },
+          body: form,
+        });
+        if (!uploadResponse.ok) {
+          throw new Error(
+            'File upload failed for "' + name + '" (HTTP ' + uploadResponse.status + ')',
+          );
+        }
+        var uploadJson = await uploadResponse.json();
+        if (!uploadJson.fileStored || !uploadJson.generatedObject) {
+          throw new Error(
+            'File upload rejected for "' + name + '": ' +
+              (uploadJson.errorMessage || JSON.stringify(uploadJson)),
+          );
+        }
+        return { tempFileId: String(uploadJson.generatedObject) };
+      }
+
       var uploadedFiles = [];
       for (var fi = 0; fi < fileUrls.length; fi++) {
         var fileUrl = fileUrls[fi];
 
-        // Download the file using native fetch (not z.request) so no Authorization
-        // header is added — pre-signed S3 URLs are self-authenticating and S3 rejects
+        // Download using native fetch (not z.request) so no Authorization header
+        // is added — pre-signed S3 URLs are self-authenticating and S3 rejects
         // requests that carry an extra Authorization header.
         var fileResp = await fetch(fileUrl);
         if (!fileResp.ok) {
@@ -170,9 +196,9 @@ const perform = async (z, bundle) => {
           );
         }
 
-        // Resolve the filename: prefer Content-Disposition (Zapier S3 sets this to the
-        // original filename), fall back to the URL path segment, then add the correct
-        // extension from Content-Type when the path segment has none.
+        // Resolve the filename: prefer Content-Disposition (Zapier S3 sets this to
+        // the original filename), fall back to the URL path segment, then append
+        // the correct extension from Content-Type when the path has none.
         var filename = '';
         var contentDisposition = fileResp.headers.get('content-disposition') || '';
         var cdMatch = contentDisposition.match(/filename[^;=\n]*=(?:(['"])([^'"]*)\1|([^;\n]*))/);
@@ -183,45 +209,46 @@ const perform = async (z, bundle) => {
           var urlPath = fileUrl.split('?')[0];
           filename = urlPath.split('/').pop() || 'attachment';
         }
+        var ct = fileResp.headers.get('content-type') || '';
         if (!filename.includes('.')) {
-          var ct = fileResp.headers.get('content-type') || '';
           if (ct.includes('pdf')) filename += '.pdf';
           else if (ct.includes('xml')) filename += '.xml';
           else if (ct.includes('jpeg') || ct.includes('jpg')) filename += '.jpg';
           else if (ct.includes('png')) filename += '.png';
+          else if (ct.includes('zip')) filename += '.zip';
         }
 
-        // Read the response as a Blob — this preserves the server's MIME type and
-        // avoids the Buffer→Blob conversion that can produce an empty body in some
-        // Lambda Node.js builds.
-        var fileBlob = await fileResp.blob();
+        var isZip =
+          filename.toLowerCase().endsWith('.zip') ||
+          ct.includes('zip');
 
-        // Upload to work4all as TempDatei using multipart/form-data
-        var form = new FormData();
-        form.append('myFile', fileBlob, filename);
-
-        var uploadResponse = await fetch(fileUploadUrl, {
-          method: 'POST',
-          headers: { Authorization: 'Bearer ' + bundle.authData.bearer_token },
-          body: form,
-        });
-
-        if (!uploadResponse.ok) {
-          throw new Error(
-            'File upload failed for "' + filename + '" (HTTP ' + uploadResponse.status + ')',
-          );
+        if (isZip) {
+          // Extract ZIP and upload each contained file individually.
+          var zipBuffer = await fileResp.arrayBuffer();
+          var zip = await JSZip.loadAsync(zipBuffer);
+          var entries = Object.values(zip.files).filter(function (e) {
+            if (e.dir) return false;
+            var base = e.name.split('/').pop() || '';
+            // Skip macOS resource-fork files (__MACOSX/ folder and ._* entries)
+            if (e.name.startsWith('__MACOSX/')) return false;
+            if (base.startsWith('._')) return false;
+            return true;
+          });
+          if (entries.length === 0) {
+            throw new Error('ZIP archive "' + filename + '" contains no files.');
+          }
+          for (var ei = 0; ei < entries.length; ei++) {
+            var entry = entries[ei];
+            var entryName = entry.name.split('/').pop() || entry.name;
+            var entryBuffer = await entry.async('arraybuffer');
+            var entryBlob = new Blob([entryBuffer]);
+            uploadedFiles.push(await uploadBlob(entryBlob, entryName));
+          }
+        } else {
+          // Regular file: read as Blob (preserves MIME type, avoids Buffer→Blob issues).
+          var fileBlob = await fileResp.blob();
+          uploadedFiles.push(await uploadBlob(fileBlob, filename));
         }
-
-        var uploadJson = await uploadResponse.json();
-
-        if (!uploadJson.fileStored || !uploadJson.generatedObject) {
-          throw new Error(
-            'File upload rejected for "' + filename + '": ' +
-              (uploadJson.errorMessage || JSON.stringify(uploadJson)),
-          );
-        }
-
-        uploadedFiles.push({ tempFileId: String(uploadJson.generatedObject) });
       }
 
       receipts = { add: uploadedFiles };
