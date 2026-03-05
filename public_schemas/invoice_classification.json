@@ -1,0 +1,16 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Invoice Classification",
+    "description": "Classifies whether a document is an invoice with an attachment that should be processed",
+    "type": "object",
+    "properties": {
+        "has_invoice": {
+            "type": "boolean",
+            "description": "True if the email message contains an invoice attachment"
+        }
+    },
+    "required": [
+        "has_invoice"
+    ],
+    "additionalProperties": false
+}
