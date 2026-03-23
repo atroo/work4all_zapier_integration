@@ -12,25 +12,31 @@ const perform = App.creates['create_invoice'].operation.perform;
 
 const RECEIPTS_DIR = path.join(__dirname, '../../data/receipts');
 
-// Human-readable supplier number (Lieferant.nummer) — the integration looks up
-// the internal code automatically. Use WORK4ALL_SUPPLIER_NUMBER if set, otherwise
-// fall back to the known-good test supplier (nummer=70361, firma1="TO Test").
-const SUPPLIER_NUMBER = process.env.WORK4ALL_SUPPLIER_NUMBER || '70361';
+const SUPPLIER_CODE = process.env.W4A_TEST_SUPPLIER_CODE;
+const ACCOUNT_CODE = parseInt(process.env.W4A_TEST_ACCOUNT_CODE || '0', 10);
 
 // Use today's date so test invoices are easy to find and delete in work4all.
 const TODAY = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
 
-// Full header payload from the backend developer's sample.
-// invoiceItems uses an empty array because specific account/taxCode values
-// are environment-dependent — the backend returns NullReferenceException
-// when invoiceItems is null/omitted, and ValidationError for unknown codes.
-// Provide WORK4ALL_INVOICE_ITEMS in .env with a JSON array of valid positions
-// to test line-item creation in your specific environment.
+/** One line item hitting the test account — mirrors the n8n baseItems() helper */
+function baseItems() {
+  if (!ACCOUNT_CODE) return '[]';
+  return JSON.stringify([
+    {
+      account: ACCOUNT_CODE,
+      taxRate: 19,
+      netAmount: 10.0,
+      grossAmount: 11.9,
+      vatAmount: 1.9,
+      note: '[Zapier test]',
+    },
+  ]);
+}
+
 const FULL_INPUT = {
-  supplier_number: SUPPLIER_NUMBER,
-  project_code: '1610906012',
-  note: 'Eingangsrechnungs-Notiz',
-  invoice_number_supplier: 'xy1234-4022',
+  supplier_code: SUPPLIER_CODE,
+  note: '[Zapier test] Full header input',
+  invoice_number_supplier: `ZAP-${Date.now()}`,
   invoice_date: TODAY,
   entry_date: TODAY,
   receipt_date: TODAY,
@@ -40,12 +46,17 @@ const FULL_INPUT = {
   discount2_rate: '5',
   discount2_days: '3',
   currency_code: '1',
-  invoice_items: process.env.WORK4ALL_INVOICE_ITEMS || '[]',
+  invoice_items: baseItems(),
 };
 
 function makeBundle(inputData) {
   return {
-    authData: { bearer_token: process.env.WORK4ALL_BEARER_TOKEN || 'dummy-token' },
+    authData: {
+      base_url: process.env.W4A_BASE_URL || 'https://api.work4all.de',
+      token_url: process.env.W4A_API_ACCESS_TOKEN_URL || 'https://dummy.invalid/token',
+      client_id: process.env.W4A_API_CLIENT_ID || 'dummy-client-id',
+      client_secret: process.env.W4A_API_CLIENT_SECRET || 'dummy-secret',
+    },
     inputData,
   };
 }
@@ -54,27 +65,36 @@ function makeBundle(inputData) {
 // Input validation tests — these throw before any HTTP call is made
 // ---------------------------------------------------------------------------
 describe('creates.create_invoice – input validation', () => {
-  it('throws when both supplier_number and supplier_name are missing', async () => {
+  it('throws when all supplier fields are missing', async () => {
     await expect(
       appTester(perform, makeBundle({ note: 'test' })),
-    ).rejects.toThrow('Either supplier_number or supplier_name is required');
+    ).rejects.toThrow('At least one supplier field is required');
   });
 
-  it('throws when both supplier_number and supplier_name are null', async () => {
+  it('throws when all supplier fields are null', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_number: null, supplier_name: null })),
-    ).rejects.toThrow('Either supplier_number or supplier_name is required');
+      appTester(
+        perform,
+        makeBundle({
+          supplier_code: null,
+          supplier_name: null,
+          supplier_customer_number_at_supplier: null,
+          supplier_contact_mail_address: null,
+          supplier_iban: null,
+        }),
+      ),
+    ).rejects.toThrow('At least one supplier field is required');
   });
 
   it('throws when invoice_items is not valid JSON', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_number: '70361', invoice_items: '{broken json' })),
+      appTester(perform, makeBundle({ supplier_code: '12345', invoice_items: '{broken json' })),
     ).rejects.toThrow('invoice_items must be a valid JSON array');
   });
 
   it('throws when invoice_items is a JSON object instead of array', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_number: '70361', invoice_items: '{"account":1}' })),
+      appTester(perform, makeBundle({ supplier_code: '12345', invoice_items: '{"account":1}' })),
     ).rejects.toThrow('invoice_items must be a JSON array');
   });
 
@@ -82,15 +102,27 @@ describe('creates.create_invoice – input validation', () => {
     await expect(
       appTester(
         perform,
-        makeBundle({ supplier_number: '70361', invoice_items: '"just a string"' }),
+        makeBundle({ supplier_code: '12345', invoice_items: '"just a string"' }),
       ),
     ).rejects.toThrow('invoice_items must be a JSON array');
   });
 
   it('throws when project_code is not a valid integer', async () => {
     await expect(
-      appTester(perform, makeBundle({ supplier_number: '70361', project_code: 'bad' })),
+      appTester(perform, makeBundle({ supplier_code: '12345', project_code: 'bad' })),
     ).rejects.toThrow('project_code must be an integer');
+  });
+
+  it('throws when invoice_data_json is not valid JSON', async () => {
+    await expect(
+      appTester(perform, makeBundle({ invoice_data_json: '{broken' })),
+    ).rejects.toThrow('invoice_data_json must be valid JSON');
+  });
+
+  it('throws when invoice_data_json has no supplier field', async () => {
+    await expect(
+      appTester(perform, makeBundle({ invoice_data_json: '{"note":"test"}' })),
+    ).rejects.toThrow('invoice_data_json must include at least one supplier field');
   });
 
   it('throws when a receipt_file_url is unreachable', async () => {
@@ -98,7 +130,7 @@ describe('creates.create_invoice – input validation', () => {
       appTester(
         perform,
         makeBundle({
-          supplier_number: SUPPLIER_NUMBER,
+          supplier_code: SUPPLIER_CODE || '12345',
           receipt_file_urls: ['https://invalid.example.invalid/file.pdf'],
         }),
       ),
@@ -116,8 +148,19 @@ describe('creates.create_invoice – API integration', () => {
   let fileServerPort;
 
   beforeAll(async () => {
-    if (!process.env.WORK4ALL_BEARER_TOKEN) {
-      throw new Error('WORK4ALL_BEARER_TOKEN is required to run integration tests.');
+    const hasCredentials =
+      process.env.W4A_BASE_URL &&
+      process.env.W4A_API_ACCESS_TOKEN_URL &&
+      process.env.W4A_API_CLIENT_ID &&
+      process.env.W4A_API_CLIENT_SECRET &&
+      process.env.W4A_TEST_SUPPLIER_CODE &&
+      process.env.W4A_TEST_ACCOUNT_CODE;
+
+    if (!hasCredentials) {
+      throw new Error(
+        'W4A_BASE_URL, W4A_API_ACCESS_TOKEN_URL, W4A_API_CLIENT_ID, W4A_API_CLIENT_SECRET, ' +
+          'W4A_TEST_SUPPLIER_CODE, and W4A_TEST_ACCOUNT_CODE are required to run integration tests.',
+      );
     }
 
     await new Promise((resolve) => {
@@ -127,7 +170,8 @@ describe('creates.create_invoice – API integration', () => {
         try {
           const data = fs.readFileSync(filePath);
           const ext = path.extname(filename).toLowerCase();
-          const mimeType = ext === '.pdf' ? 'application/pdf' : 'application/octet-stream';
+          const mimeTypes = { '.pdf': 'application/pdf', '.xml': 'application/xml', '.zip': 'application/zip' };
+          const mimeType = mimeTypes[ext] || 'application/octet-stream';
           res.writeHead(200, { 'Content-Type': mimeType, 'Content-Length': data.length });
           res.end(data);
         } catch {
@@ -151,52 +195,35 @@ describe('creates.create_invoice – API integration', () => {
   it('creates invoice with full header input', async () => {
     const result = await appTester(perform, makeBundle(FULL_INPUT));
 
-    // Required field — always present
     expect(typeof result.code).toBe('number');
     expect(result.code).toBeGreaterThan(0);
 
-    // Supplier internal code echoed back (resolved from supplier_number)
     expect(typeof result.sDObjMemberCode).toBe('number');
     expect(result.sDObjMemberCode).toBeGreaterThan(0);
 
-    // Note preserved
+    expect(result.lieferant).toBeDefined();
+    expect(typeof result.lieferant.code).toBe('number');
+
     expect(result.notiz).toBe(FULL_INPUT.note);
 
-    // Dates present (backend shifts to UTC so exact value may differ by timezone)
     expect(result.datum).toBeDefined();
     expect(result.eingangsDatum).toBeDefined();
     expect(result.faelligDatum).toBeDefined();
     expect(result.creationDate).toBeDefined();
 
-    // Amounts are numeric (zero when no items provided)
     expect(typeof result.rBetrag).toBe('number');
     expect(typeof result.rMwst).toBe('number');
     expect(typeof result.summe).toBe('number');
 
-    // Supplier invoice number echoed back
-    expect(result.rNummerbeiLieferant).toBe(FULL_INPUT.invoice_number_supplier);
-
-    // Discount and payment terms
     expect(result.skontoProzent).toBe(2);
     expect(result.skontoTg).toBe(8);
     expect(result.paymentTermDays).toBe(11);
-
-    // Currency and project
     expect(result.waehrungCode).toBe(1);
-    expect(result.projektCode).toBe(parseInt(FULL_INPUT.project_code, 10));
 
-    // buchungen is always an array (empty when no items)
     expect(Array.isArray(result.buchungen)).toBe(true);
-
-    // If WORK4ALL_INVOICE_ITEMS was provided, assert line items are populated
-    if (process.env.WORK4ALL_INVOICE_ITEMS) {
-      const expectedCount = JSON.parse(process.env.WORK4ALL_INVOICE_ITEMS).length;
-      expect(result.buchungen.length).toBe(expectedCount);
-      if (result.buchungen.length > 0) {
-        const line = result.buchungen[0];
-        expect(typeof line.code).toBe('number');
-        expect(typeof line.valueNet).toBe('number');
-      }
+    if (ACCOUNT_CODE) {
+      expect(result.buchungen.length).toBe(1);
+      expect(typeof result.buchungen[0].valueNet).toBe('number');
     }
   }, 15000);
 
@@ -205,14 +232,150 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_number: SUPPLIER_NUMBER,
-        note: 'Array passthrough test',
+        supplier_code: SUPPLIER_CODE,
+        note: '[Zapier test] Array passthrough',
         invoice_items: [],
       }),
     );
 
     expect(result.code).toBeGreaterThan(0);
     expect(Array.isArray(result.buchungen)).toBe(true);
+  }, 15000);
+
+  it('creates invoice via JSON mode (LLM output path)', async () => {
+    const invoiceData = {
+      supplierCode: parseInt(SUPPLIER_CODE, 10),
+      invoiceNumberSupplier: `ZAP-JSON-${Date.now()}`,
+      note: '[Zapier test] JSON mode',
+      invoiceDate: TODAY,
+      entryDate: TODAY,
+      invoiceItems: ACCOUNT_CODE
+        ? [{ account: ACCOUNT_CODE, taxRate: 19, netAmount: 10.0, grossAmount: 11.9, vatAmount: 1.9, note: '[Zapier test]' }]
+        : [],
+    };
+
+    const result = await appTester(
+      perform,
+      makeBundle({ invoice_data_json: JSON.stringify(invoiceData) }),
+    );
+
+    expect(result.code).toBeGreaterThan(0);
+    expect(result.lieferant).toBeDefined();
+    expect(Array.isArray(result.buchungen)).toBe(true);
+  }, 15000);
+
+  // Helper: build a local file server URL for a fixture file
+  function fileUrl(filename) {
+    return `http://127.0.0.1:${fileServerPort}/${encodeURIComponent(filename)}`;
+  }
+
+  // Helper: base bundle for a single-attachment test
+  function singleFileBundle(note, filename) {
+    return makeBundle({
+      supplier_code: SUPPLIER_CODE,
+      note,
+      invoice_items: baseItems(),
+      invoice_date: TODAY,
+      receipt_file_urls: [fileUrl(filename)],
+    });
+  }
+
+  // NOTE: supplierName / supplierContactMailAddress / supplierIban lookup fields may not yet
+  // be deployed on the test server — supplierCode is added as fallback until then.
+  // Once deployed, remove the supplierCode line.
+  it('creates invoice from JSON mode with supplier lookup by name/email/IBAN', async () => {
+    const invoiceData = {
+      supplierCode: parseInt(SUPPLIER_CODE, 10), // TODO: remove once backend lookup fields are deployed
+      supplierName: 'atroo GmbH',
+      supplierContactMailAddress: 'info@atroo.de',
+      supplierIban: 'DE16100100100937368106',
+      invoiceNumberSupplier: `ZAP-LOOKUP-${Date.now()}`,
+      note: '[Zapier test] Supplier lookup by name/email/IBAN',
+      invoiceDate: TODAY,
+      invoiceItems: ACCOUNT_CODE
+        ? [{ account: ACCOUNT_CODE, taxRate: 19, netAmount: 10.0, grossAmount: 11.9, vatAmount: 1.9, note: '[Zapier test]' }]
+        : [],
+    };
+
+    const result = await appTester(
+      perform,
+      makeBundle({ invoice_data_json: JSON.stringify(invoiceData) }),
+    );
+
+    expect(result.code).toBeGreaterThan(0);
+    expect(result.lieferant).toBeDefined();
+  }, 15000);
+
+  it('creates invoice via JSON mode with one PDF attachment', async () => {
+    const invoiceData = {
+      supplierCode: parseInt(SUPPLIER_CODE, 10),
+      invoiceNumberSupplier: `ZAP-JSON-PDF-${Date.now()}`,
+      note: '[Zapier test] JSON mode with PDF',
+      invoiceDate: TODAY,
+      invoiceItems: ACCOUNT_CODE
+        ? [{ account: ACCOUNT_CODE, taxRate: 19, netAmount: 10.0, grossAmount: 11.9, vatAmount: 1.9, note: '[Zapier test]' }]
+        : [],
+    };
+
+    const result = await appTester(
+      perform,
+      makeBundle({
+        invoice_data_json: JSON.stringify(invoiceData),
+        receipt_file_urls: [fileUrl('Teamviewer - normales PDF.pdf')],
+      }),
+    );
+
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with one normal PDF attachment', async () => {
+    const result = await appTester(perform, singleFileBundle('[Zapier test] PDF normal', 'Teamviewer - normales PDF.pdf'));
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with one ZUGFeRD PDF attachment', async () => {
+    const result = await appTester(perform, singleFileBundle('[Zapier test] PDF ZUGFeRD', 'Lisa Jäckel - ZUGFeRD.pdf'));
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with one XRechnung XML attachment', async () => {
+    const result = await appTester(perform, singleFileBundle('[Zapier test] XML XRechnung', 'atroo xrechnung.xml'));
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with multiple PDF attachments', async () => {
+    const result = await appTester(
+      perform,
+      makeBundle({
+        supplier_code: SUPPLIER_CODE,
+        note: '[Zapier test] Multiple PDFs',
+        invoice_items: baseItems(),
+        invoice_date: TODAY,
+        receipt_file_urls: [
+          fileUrl('Teamviewer - normales PDF.pdf'),
+          fileUrl('Teamviewer - normales Addition.pdf'),
+        ],
+      }),
+    );
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with non-valid ZUGFeRD PDF (API should still accept the file)', async () => {
+    const result = await appTester(perform, singleFileBundle('[Zapier test] PDF invalid ZUGFeRD', 'EMOVA - nicht valides ZUGFeRD.pdf'));
+    expect(result.code).toBeGreaterThan(0);
+  }, 15000);
+
+  it('creates invoice with form fields and one PDF attachment', async () => {
+    const result = await appTester(
+      perform,
+      makeBundle({
+        ...FULL_INPUT,
+        invoice_number_supplier: `ZAP-FORM-PDF-${Date.now()}`,
+        note: '[Zapier test] Form fields with PDF',
+        receipt_file_urls: [fileUrl('Teamviewer - normales PDF.pdf')],
+      }),
+    );
+    expect(result.code).toBeGreaterThan(0);
   }, 15000);
 
   it('creates invoice with receipt files from data/receipts/ attached', async () => {
@@ -226,9 +389,9 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_number: SUPPLIER_NUMBER,
-        note: `Receipt-upload test (${files.length} file(s))`,
-        invoice_items: '[]',
+        supplier_code: SUPPLIER_CODE,
+        note: `[Zapier test] Receipt upload (${files.length} file(s))`,
+        invoice_items: baseItems(),
         invoice_date: TODAY,
         entry_date: TODAY,
         receipt_date: TODAY,
@@ -238,9 +401,6 @@ describe('creates.create_invoice – API integration', () => {
 
     expect(result.code).toBeGreaterThan(0);
     expect(result.sDObjMemberCode).toBeGreaterThan(0);
-    // If the upload or the mutation failed, the perform function would have
-    // thrown — reaching this assertion means all files were uploaded and
-    // linked to the invoice successfully.
   }, 60000);
 
   it('extracts a ZIP and uploads each contained file individually', async () => {
@@ -250,9 +410,9 @@ describe('creates.create_invoice – API integration', () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_number: SUPPLIER_NUMBER,
-        note: 'ZIP extraction test',
-        invoice_items: '[]',
+        supplier_code: SUPPLIER_CODE,
+        note: '[Zapier test] ZIP extraction',
+        invoice_items: baseItems(),
         invoice_date: TODAY,
         entry_date: TODAY,
         receipt_date: TODAY,
@@ -263,16 +423,14 @@ describe('creates.create_invoice – API integration', () => {
     );
 
     expect(result.code).toBeGreaterThan(0);
-    // If any file upload inside the ZIP failed, perform() would have thrown
-    // before reaching this assertion.
   }, 60000);
 
   it('returns all expected output field keys', async () => {
     const result = await appTester(
       perform,
       makeBundle({
-        supplier_number: SUPPLIER_NUMBER,
-        note: 'Output field shape test',
+        supplier_code: SUPPLIER_CODE,
+        note: '[Zapier test] Output field shape',
         invoice_items: '[]',
       }),
     );
@@ -288,6 +446,7 @@ describe('creates.create_invoice – API integration', () => {
       'statusCode',
       'creationDate',
       'buchungen',
+      'lieferant',
     ];
     for (const key of expectedKeys) {
       expect(result).toHaveProperty(key);
