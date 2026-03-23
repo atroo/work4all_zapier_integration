@@ -1,6 +1,6 @@
 {
   "name": "work-4-all",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "work4all: Die digitale Schaltzentrale für kleine und mittlere Unternehmen.",
   "main": "index.js",
   "scripts": {
