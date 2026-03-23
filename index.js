@@ -4,6 +4,8 @@ const createCustomerCreate = require('./creates/create_customer.js');
 const updateCustomerCreate = require('./creates/update_customer.js');
 const findCustomerSearch = require('./searches/find_customer.js');
 const findCustomersSearch = require('./searches/find_customers.js');
+const findProjectSearch = require('./searches/find_project.js');
+const findProjectsSearch = require('./searches/find_projects.js');
 
 module.exports = {
   version: require('./package.json').version,
@@ -17,5 +19,7 @@ module.exports = {
   searches: {
     [findCustomerSearch.key]: findCustomerSearch,
     [findCustomersSearch.key]: findCustomersSearch,
+    [findProjectSearch.key]: findProjectSearch,
+    [findProjectsSearch.key]: findProjectsSearch,
   },
 };
