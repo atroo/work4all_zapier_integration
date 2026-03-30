@@ -1,27 +1,30 @@
 openapi: 3.0.3
 
 info:
-  title: work4all API
+  title: work4all API — Zapier Integration
   description: |
-    REST and GraphQL API for work4all — the digital management platform for small and medium-sized businesses.
-
-    This documentation covers the API endpoints used by the **work4all Zapier integration**.
+    This document describes the operations available in the **work4all Zapier integration**.
 
     ## Authentication
 
-    All requests require a Bearer access token obtained via the OAuth2 Client Credentials flow.
-    Request a token from the token endpoint first, then include it in every subsequent request
-    as `Authorization: Bearer <token>`.
+    The integration uses **OAuth2 Client Credentials**. You need:
+    - **API URL** — base URL of your work4all instance (e.g. `https://api.work4all.de`)
+    - **Token URL** — OAuth2 token endpoint (e.g. `https://api.work4all.de/api/OAuth2/token`)
+    - **Client ID** — provided by work4all
+    - **Client Secret** — provided by work4all
 
-    ## GraphQL
+    ## Operations
 
-    All data operations (invoices, customers, projects) go through a single GraphQL endpoint (`POST /graphql`).
-    Each operation is shown as a separate example below.
+    | Type   | Name               | Description                              |
+    |--------|--------------------|------------------------------------------|
+    | Action | Create Invoice     | Creates a complete incoming invoice      |
+    | Action | Create Customer    | Creates a new customer                   |
+    | Action | Update Customer    | Updates an existing customer             |
+    | Search | Find Customer      | Finds a single customer by code          |
+    | Search | Find Customers     | Returns a paginated list of customers    |
+    | Search | Find Project       | Finds a single project by code           |
+    | Search | Find Projects      | Returns a paginated list of projects     |
 
-    ## File Upload
-
-    Attachments (e.g. invoice PDFs) are uploaded via a REST endpoint before being linked to an invoice
-    via the GraphQL mutation.
   version: "1.0.0"
   contact:
     name: work4all Support
@@ -34,439 +37,628 @@ servers:
 
 components:
   securitySchemes:
-    oauth2ClientCredentials:
+    oauth2:
       type: oauth2
-      description: |
-        OAuth2 Client Credentials flow. Obtain a token from your tenant's token endpoint and
-        include it as `Authorization: Bearer <token>` in all API requests.
       flows:
         clientCredentials:
           tokenUrl: /api/OAuth2/token
           scopes: {}
 
   schemas:
-    GraphQLRequest:
-      type: object
-      required:
-        - query
-      properties:
-        query:
-          type: string
-          description: GraphQL query or mutation string.
-        variables:
-          type: object
-          additionalProperties: true
-          description: Variables for the query or mutation.
-        operationName:
-          type: string
-          description: Optional name of the operation to execute.
 
-    GraphQLError:
+    Invoice:
       type: object
       properties:
-        message:
+        code:
+          type: integer
+          description: Unique internal invoice code.
+          example: 1582980996
+        rNummer:
+          type: integer
+          description: Sequential invoice number assigned by work4all.
+          example: 250291
+        rNummerbeiLieferant:
           type: string
-        locations:
+          description: The supplier's own invoice number.
+          example: "INV-2026-001"
+        datum:
+          type: string
+          format: date-time
+          description: Invoice date.
+        eingangsDatum:
+          type: string
+          format: date-time
+          description: Receipt date.
+        faelligDatum:
+          type: string
+          format: date-time
+          description: Due date.
+        buchungsDatum:
+          type: string
+          format: date-time
+          description: Posting date.
+        notiz:
+          type: string
+          description: Internal note.
+        sDObjMemberCode:
+          type: integer
+          description: Internal code of the linked supplier.
+        projektCode:
+          type: integer
+          description: Internal code of the linked project.
+        rBetrag:
+          type: number
+          description: Invoice gross amount.
+        rMwst:
+          type: number
+          description: VAT amount.
+        summe:
+          type: number
+          description: Total sum.
+        waehrungCode:
+          type: integer
+          description: Currency code (1 = EUR).
+        paymentTermDays:
+          type: integer
+          description: Payment term in days.
+        skontoProzent:
+          type: number
+          description: Discount 1 rate (%).
+        skontoTg:
+          type: integer
+          description: Discount 1 days.
+        statusCode:
+          type: integer
+          description: Invoice status code.
+        creationDate:
+          type: string
+          format: date-time
+          description: Timestamp when the invoice was created in work4all.
+        lieferant:
+          type: object
+          properties:
+            code: { type: integer }
+            nummer: { type: integer }
+            name: { type: string }
+        projekt:
+          type: object
+          nullable: true
+          properties:
+            code: { type: integer }
+            nummer: { type: string }
+            name: { type: string }
+        buchungen:
           type: array
+          description: Invoice line items.
           items:
             type: object
             properties:
-              line:
-                type: integer
-              column:
-                type: integer
-        path:
+              code: { type: integer }
+              sachkontoCode: { type: integer, description: "Account code." }
+              sachkontoNummer: { type: string, description: "Account number." }
+              kostenstelleCode: { type: integer, description: "Cost center code." }
+              kostenstelleNummer: { type: string, description: "Cost center number." }
+              kostengruppeCode: { type: integer, description: "Cost group code." }
+              projektCode: { type: integer }
+              steuerschluessel: { type: integer, description: "Tax key." }
+              mwst: { type: number, description: "Tax rate (%)." }
+              valueNet: { type: number, description: "Net amount." }
+              mwstBetrag: { type: number, description: "VAT amount." }
+              anteilDM: { type: number, description: "Gross amount." }
+              notiz: { type: string }
+
+    InvoiceInput:
+      type: object
+      description: |
+        All fields are optional except that at least one supplier identifier must be provided.
+        You can either provide a complete JSON object in `invoiceDataJson` (ideal for LLM output),
+        or fill each field individually.
+      properties:
+        invoiceDataJson:
+          type: string
+          description: |
+            Complete invoice data as a JSON object. When provided, all individual fields below
+            are ignored. Field names use camelCase. Example:
+            `{"supplierCode":123,"invoiceNumberSupplier":"INV-001","invoiceDate":"2026-01-15T00:00:00Z","invoiceItems":[{"account":4500,"taxRate":19,"netAmount":100,"grossAmount":119,"vatAmount":19}]}`
+        supplierCode:
+          type: integer
+          description: Internal work4all supplier code. Takes priority over all other supplier lookup fields.
+        supplierName:
+          type: string
+          description: Look up supplier by name. Match must be unique.
+        supplierCustomerNumberAtSupplier:
+          type: string
+          description: Your own customer number at this supplier. Match must be unique.
+        supplierContactMailAddress:
+          type: string
+          description: Email address of the supplier or one of their contacts. Match must be unique.
+        supplierIban:
+          type: string
+          description: IBAN of the supplier. Match must be unique.
+        invoiceNumberSupplier:
+          type: string
+          description: The supplier's own invoice number.
+        note:
+          type: string
+          description: Internal note for the invoice.
+        invoiceDate:
+          type: string
+          format: date-time
+        entryDate:
+          type: string
+          format: date-time
+        receiptDate:
+          type: string
+          format: date-time
+        projectCode:
+          type: integer
+          description: Internal project code. Takes priority over project number and name.
+        projectNumber:
+          type: string
+          description: Human-readable project number. Match must be unique.
+        projectName:
+          type: string
+          description: Project name. Match must be unique.
+        paymentTermDays:
+          type: integer
+        discount1Days:
+          type: integer
+        discount1Rate:
+          type: number
+        discount2Days:
+          type: integer
+        discount2Rate:
+          type: number
+        currencyCode:
+          type: integer
+          description: Internal currency code (e.g. 1 for EUR).
+        invoiceItems:
+          type: array
+          description: List of invoice line items.
+          items:
+            type: object
+            properties:
+              account: { type: integer }
+              costCenter: { type: integer }
+              costGroup: { type: integer }
+              projectCode: { type: integer }
+              taxCode: { type: integer }
+              taxRate: { type: number }
+              netAmount: { type: number }
+              grossAmount: { type: number }
+              vatAmount: { type: number }
+              note: { type: string }
+        receiptFileUrls:
           type: array
           items:
             type: string
+            format: uri
+          description: |
+            URLs of files to attach (PDF, XML, ZIP). Each file is automatically downloaded
+            and uploaded to work4all as a receipt attachment. ZIP archives are extracted
+            and each contained file is uploaded individually.
 
-    TokenResponse:
+    Customer:
       type: object
       properties:
-        access_token:
-          type: string
-        token_type:
-          type: string
-          example: Bearer
-        expires_in:
+        code:
           type: integer
-          example: 3600
+          description: Unique internal customer code.
+          example: 123456789
+        nummer:
+          type: integer
+          description: Human-readable customer number.
+          example: 1001
+        name:
+          type: string
+          description: Full display name (typically company name + city).
+          example: "Acme GmbH, Berlin"
+        eMail:
+          type: string
+          example: "info@acme.de"
+        telefon:
+          type: string
+          example: "+49 30 123456"
+        strasse:
+          type: string
+          description: Street address.
+        plz:
+          type: string
+          description: Postal code.
+        ort:
+          type: string
+          description: City.
+        notiz:
+          type: string
+          description: Internal note.
+        interNet:
+          type: string
+          description: Website URL.
+        privatkunde:
+          type: boolean
+          description: True if this is a private (non-business) customer.
+        gesperrt:
+          type: boolean
+          description: True if the customer account is blocked.
+        zahlungsfrist:
+          type: integer
+          description: Default payment term in days.
+        gruppe:
+          type: object
+          nullable: true
+          properties:
+            code: { type: integer }
+            name: { type: string }
 
-    FileUploadResponse:
+    CustomerInput:
       type: object
       properties:
-        fileStored:
-          type: boolean
-          description: True if the file was accepted and stored.
-        generatedObject:
+        firma1:
           type: string
-          description: Temporary file ID to be referenced in a subsequent mutation.
-        errorMessage:
+          description: Legal company name. Required when creating a customer.
+          example: "Acme GmbH"
+        eMail:
           type: string
-          description: Present only when fileStored is false.
+          description: Primary email address.
+        telefon:
+          type: string
+          description: Primary phone number.
+        strasse:
+          type: string
+          description: Street address including house number.
+        plz:
+          type: string
+          description: Postal / ZIP code.
+        ort:
+          type: string
+          description: City or town name.
+        interNet:
+          type: string
+          description: Company website URL.
+        notiz:
+          type: string
+          description: Internal note about this customer.
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Unique internal project code.
+          example: 1610906012
+        name:
+          type: string
+          example: "Website Relaunch"
+        number:
+          type: string
+          description: Human-readable project number.
+          example: "P-2026-001"
+        startDateInner:
+          type: string
+          format: date-time
+          description: Planned start date (inner).
+        startDateOuter:
+          type: string
+          format: date-time
+          description: Contractual start date (outer).
+        endDateInner:
+          type: string
+          format: date-time
+          description: Planned end date (inner).
+        endDateOuter:
+          type: string
+          format: date-time
+          description: Contractual end date (outer).
+        customerId:
+          type: integer
+          description: Internal code of the linked customer.
+        customer:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            number: { type: integer }
+        supplierId:
+          type: integer
+          nullable: true
+          description: Internal code of the linked supplier.
+
+    PaginatedCustomers:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of matching customers.
+        size:
+          type: integer
+          description: Number of results returned on this page.
+        page:
+          type: integer
+          description: Current page number (1-based).
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+
+    PaginatedProjects:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of matching projects.
+        size:
+          type: integer
+          description: Number of results returned on this page.
+        page:
+          type: integer
+          description: Current page number (1-based).
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
 
 security:
-  - oauth2ClientCredentials: []
+  - oauth2: []
+
+tags:
+  - name: Invoices
+    description: Create and manage incoming invoices.
+  - name: Customers
+    description: Create, update, and search customers.
+  - name: Projects
+    description: Search projects.
 
 paths:
-  /api/OAuth2/token:
-    post:
-      summary: Obtain access token
-      description: |
-        Exchange your Client ID and Client Secret for a short-lived Bearer access token
-        using the OAuth2 Client Credentials grant.
-      security: []
-      tags:
-        - Authentication
-      requestBody:
-        required: true
-        content:
-          application/x-www-form-urlencoded:
-            schema:
-              type: object
-              required:
-                - grant_type
-                - client_id
-                - client_secret
-              properties:
-                grant_type:
-                  type: string
-                  enum:
-                    - client_credentials
-                client_id:
-                  type: string
-                  description: Your OAuth2 Client ID.
-                client_secret:
-                  type: string
-                  description: Your OAuth2 Client Secret.
-      responses:
-        "200":
-          description: Access token issued successfully.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TokenResponse"
-        "400":
-          description: Invalid credentials or grant type.
 
-  /graphql:
+  /invoices:
     post:
-      summary: GraphQL endpoint
+      operationId: createInvoice
+      summary: Create Invoice
       description: |
-        Single endpoint for all data operations. Send a JSON body with `query` (or `mutation`),
-        optional `variables`, and an optional `operationName`.
+        Creates a complete incoming invoice in work4all.
 
-        Requires the `GraphQL-Require-Preflight: true` header.
+        You can identify the supplier by code, name, email, IBAN, or customer number —
+        the server resolves them in that priority order.
+
+        **JSON mode (recommended for LLM output):** provide all data in the `invoiceDataJson`
+        field as a single JSON object and leave all other fields empty.
+
+        **Form fields mode:** fill each field individually.
       tags:
-        - GraphQL
-      parameters:
-        - in: header
-          name: GraphQL-Require-Preflight
-          required: true
-          schema:
-            type: string
-            enum:
-              - "true"
+        - Invoices
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/GraphQLRequest"
+              $ref: "#/components/schemas/InvoiceInput"
             examples:
-              createIncomingInvoice:
-                summary: Create an incoming invoice
+              jsonMode:
+                summary: JSON mode — full invoice with line item
                 value:
-                  operationName: CreateCompleteIncomingInvoice
-                  query: |
-                    mutation CreateCompleteIncomingInvoice(
-                      $input: InputCompleteIncomingInvoice!
-                      $receipts: InputErpAnhangAttachementsRelation
-                    ) {
-                      ahf_CreateCompleteIncomingInvoice(input: $input, receipts: $receipts) {
-                        code
-                        rNummer
-                        rNummerbeiLieferant
-                        datum
-                        faelligDatum
-                        eingangsDatum
-                        notiz
-                        rBetrag
-                        rMwst
-                        summe
-                        waehrungCode
-                        paymentTermDays
-                        skontoProzent
-                        skontoTg
-                        statusCode
-                        creationDate
-                        sDObjMemberCode
-                        projektCode
-                        buchungen {
-                          code
-                          sachkontoCode
-                          kostenstelleCode
-                          kostengruppeCode
-                          projektCode
-                          steuerschluessel
-                          mwst
-                          valueNet
-                          mwstBetrag
-                          anteilDM
-                          notiz
+                  invoiceDataJson: |
+                    {
+                      "supplierCode": 1245558295,
+                      "invoiceNumberSupplier": "INV-2026-001",
+                      "invoiceDate": "2026-01-15T00:00:00Z",
+                      "entryDate": "2026-01-15T00:00:00Z",
+                      "paymentTermDays": 30,
+                      "discount1Rate": 2,
+                      "discount1Days": 10,
+                      "currencyCode": 1,
+                      "note": "Q1 services",
+                      "invoiceItems": [
+                        {
+                          "account": 4500,
+                          "taxRate": 19,
+                          "netAmount": 100.00,
+                          "grossAmount": 119.00,
+                          "vatAmount": 19.00,
+                          "note": "Consulting"
                         }
-                        lieferant { code nummer name }
-                        projekt { code nummer name }
-                      }
+                      ]
                     }
-                  variables:
-                    input:
-                      supplierCode: 1245558295
-                      invoiceNumberSupplier: "INV-2026-001"
-                      invoiceDate: "2026-01-15T00:00:00Z"
-                      entryDate: "2026-01-15T00:00:00Z"
-                      paymentTermDays: 30
-                      discount1Rate: 2
-                      discount1Days: 10
-                      currencyCode: 1
-                      note: "Q1 services"
-                      invoiceItems:
-                        - account: 4500
-                          taxRate: 19
-                          netAmount: 100.00
-                          grossAmount: 119.00
-                          vatAmount: 19.00
-                          note: "Consulting"
-                    receipts:
-                      add:
-                        - tempFileId: "abc123-temp-file-id"
-
-              createCustomer:
-                summary: Create or update a customer (upsert)
+              formMode:
+                summary: Form fields mode — supplier lookup by name
                 value:
-                  query: |
-                    mutation upsertKunde($input: InputKunde!, $relations: InputKundeRelation) {
-                      upsertKunde(input: $input, relations: $relations) {
-                        code
-                        nummer
-                        name
-                        eMail
-                        telefon
-                        strasse
-                        plz
-                        ort
-                        notiz
-                        interNet
-                        gruppe { code name }
-                      }
-                    }
-                  variables:
-                    input:
-                      firma1: "Acme GmbH"
-                      eMail: "info@acme.de"
-                      telefon: "+49 30 123456"
-                      strasse: "Hauptstraße 1"
-                      plz: "10115"
-                      ort: "Berlin"
-                      interNet: "https://acme.de"
-                    relations: {}
-
-              updateCustomer:
-                summary: Update an existing customer by code
-                value:
-                  query: |
-                    mutation upsertKunde($input: InputKunde!, $relations: InputKundeRelation) {
-                      upsertKunde(input: $input, relations: $relations) {
-                        code
-                        nummer
-                        name
-                        eMail
-                        notiz
-                      }
-                    }
-                  variables:
-                    input:
-                      code: 123456789
-                      notiz: "Updated note"
-                    relations: {}
-
-              getCustomers:
-                summary: Get a paginated list of customers
-                value:
-                  query: |
-                    query getKunden($querySize: Int, $queryPage: Int, $filter: String) {
-                      getKunden(
-                        querySize: $querySize
-                        queryPage: $queryPage
-                        querySortBy: "name"
-                        querySortOrder: ASCENDING
-                        filter: $filter
-                      ) {
-                        total
-                        size
-                        page
-                        data {
-                          code
-                          nummer
-                          name
-                          eMail
-                          telefon
-                          strasse
-                          plz
-                          ort
-                          notiz
-                          interNet
-                          privatkunde
-                          gesperrt
-                          zahlungsfrist
-                          gruppe { code name }
-                        }
-                      }
-                    }
-                  variables:
-                    querySize: 100
-                    queryPage: 1
-
-              getCustomerByCode:
-                summary: Get a single customer by internal code
-                value:
-                  query: |
-                    query getKunden($querySize: Int, $filter: String) {
-                      getKunden(querySize: $querySize, filter: $filter) {
-                        total
-                        data {
-                          code
-                          nummer
-                          name
-                          eMail
-                          telefon
-                        }
-                      }
-                    }
-                  variables:
-                    querySize: 1
-                    filter: '[{"code":{"$eq":"123456789"}}]'
-
-              getProjects:
-                summary: Get a paginated list of projects
-                value:
-                  query: |
-                    query getProjekte($querySize: Int, $queryPage: Int, $filter: String) {
-                      getProjekte(
-                        querySize: $querySize
-                        queryPage: $queryPage
-                        querySortBy: "name"
-                        querySortOrder: ASCENDING
-                        filter: $filter
-                      ) {
-                        total
-                        size
-                        page
-                        data {
-                          id: code
-                          name
-                          number: nummer
-                          startDateInner: anfangDatum
-                          endDateInner: endeDatum
-                          customerId: kundenCode
-                          customer: kunde {
-                            id: code
-                            name
-                          }
-                        }
-                      }
-                    }
-                  variables:
-                    querySize: 100
-                    queryPage: 1
-
-              getProjectByCode:
-                summary: Get a single project by internal code
-                value:
-                  query: |
-                    query getProjekte($querySize: Int, $filter: String) {
-                      getProjekte(querySize: $querySize, filter: $filter) {
-                        total
-                        data {
-                          id: code
-                          name
-                          number: nummer
-                        }
-                      }
-                    }
-                  variables:
-                    querySize: 1
-                    filter: '[{"code":{"$in":[1610906012]}}]'
-
+                  supplierName: "Acme GmbH"
+                  invoiceNumberSupplier: "INV-2026-001"
+                  invoiceDate: "2026-01-15T00:00:00Z"
+                  paymentTermDays: 30
+                  currencyCode: 1
+                  invoiceItems:
+                    - account: 4500
+                      taxRate: 19
+                      netAmount: 100.00
+                      grossAmount: 119.00
+                      vatAmount: 19.00
       responses:
         "200":
-          description: |
-            GraphQL response. Always HTTP 200 — check the `errors` field for GraphQL-level errors.
+          description: Invoice created successfully.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    description: Operation result. Key depends on the mutation/query name.
-                  errors:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/GraphQLError"
-        "401":
-          description: Missing or invalid Bearer token.
+                $ref: "#/components/schemas/Invoice"
 
-  /api/file:
+  /customers:
     post:
-      summary: Upload a temporary file
-      description: |
-        Uploads a file (PDF, XML, image, etc.) to temporary storage and returns a `tempFileId`.
-        Pass this ID in the `receipts.add` array of the `ahf_CreateCompleteIncomingInvoice` mutation
-        to attach the file to an invoice.
-
-        Use `?type=TempDatei` as the query parameter.
+      operationId: createCustomer
+      summary: Create Customer
+      description: Creates a new customer in work4all.
       tags:
-        - Files
-      parameters:
-        - in: query
-          name: type
-          required: true
-          schema:
-            type: string
-            enum:
-              - TempDatei
+        - Customers
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
-              type: object
-              required:
-                - myFile
-              properties:
-                myFile:
-                  type: string
-                  format: binary
-                  description: The file to upload.
+              allOf:
+                - $ref: "#/components/schemas/CustomerInput"
+                - required:
+                    - firma1
+            example:
+              firma1: "Acme GmbH"
+              eMail: "info@acme.de"
+              telefon: "+49 30 123456"
+              strasse: "Hauptstraße 1"
+              plz: "10115"
+              ort: "Berlin"
+              interNet: "https://acme.de"
       responses:
         "200":
-          description: Upload result.
+          description: Customer created successfully.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FileUploadResponse"
-              examples:
-                success:
-                  summary: File accepted
-                  value:
-                    fileStored: true
-                    generatedObject: "abc123-temp-file-id"
-                failure:
-                  summary: File rejected
-                  value:
-                    fileStored: false
-                    generatedObject: ""
-                    errorMessage: "Unsupported file type"
-        "401":
-          description: Missing or invalid Bearer token.
+                $ref: "#/components/schemas/Customer"
+
+    get:
+      operationId: findCustomers
+      summary: Find Customers
+      description: Returns a paginated, name-sorted list of customers from work4all.
+      tags:
+        - Customers
+      parameters:
+        - in: query
+          name: querySize
+          schema:
+            type: integer
+            default: 100
+          description: Number of results per page.
+        - in: query
+          name: queryPage
+          schema:
+            type: integer
+            default: 1
+          description: Page number (1-based).
+        - in: query
+          name: filter
+          schema:
+            type: string
+          description: |
+            Optional JSON filter array. Example: `[{"name":{"$eq":"Acme GmbH"}}]`
+      responses:
+        "200":
+          description: Paginated list of customers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedCustomers"
+
+  /customers/{code}:
+    get:
+      operationId: findCustomer
+      summary: Find Customer
+      description: Finds a single customer by their internal work4all code.
+      tags:
+        - Customers
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: integer
+          description: Internal work4all customer code.
+          example: 123456789
+      responses:
+        "200":
+          description: Customer found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: No customer found with the given code.
+
+    put:
+      operationId: updateCustomer
+      summary: Update Customer
+      description: |
+        Updates an existing customer in work4all. Only the fields you provide are updated —
+        leave a field empty to keep its existing value.
+      tags:
+        - Customers
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: integer
+          description: Internal work4all customer code of the customer to update.
+          example: 123456789
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInput"
+            example:
+              notiz: "Updated via Zapier"
+              eMail: "new@acme.de"
+      responses:
+        "200":
+          description: Customer updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+
+  /projects:
+    get:
+      operationId: findProjects
+      summary: Find Projects
+      description: Returns a paginated, name-sorted list of projects from work4all.
+      tags:
+        - Projects
+      parameters:
+        - in: query
+          name: querySize
+          schema:
+            type: integer
+            default: 100
+          description: Number of results per page.
+        - in: query
+          name: queryPage
+          schema:
+            type: integer
+            default: 1
+          description: Page number (1-based).
+        - in: query
+          name: filter
+          schema:
+            type: string
+          description: |
+            Optional JSON filter array. Example: `[{"name":{"$eq":"My Project"}}]`
+      responses:
+        "200":
+          description: Paginated list of projects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedProjects"
+
+  /projects/{code}:
+    get:
+      operationId: findProject
+      summary: Find Project
+      description: Finds a single project by its internal work4all code.
+      tags:
+        - Projects
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            type: integer
+          description: Internal work4all project code.
+          example: 1610906012
+      responses:
+        "200":
+          description: Project found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: No project found with the given code.
