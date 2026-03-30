@@ -1,0 +1,472 @@
+openapi: 3.0.3
+
+info:
+  title: work4all API
+  description: |
+    REST and GraphQL API for work4all — the digital management platform for small and medium-sized businesses.
+
+    This documentation covers the API endpoints used by the **work4all Zapier integration**.
+
+    ## Authentication
+
+    All requests require a Bearer access token obtained via the OAuth2 Client Credentials flow.
+    Request a token from the token endpoint first, then include it in every subsequent request
+    as `Authorization: Bearer <token>`.
+
+    ## GraphQL
+
+    All data operations (invoices, customers, projects) go through a single GraphQL endpoint (`POST /graphql`).
+    Each operation is shown as a separate example below.
+
+    ## File Upload
+
+    Attachments (e.g. invoice PDFs) are uploaded via a REST endpoint before being linked to an invoice
+    via the GraphQL mutation.
+  version: "1.0.0"
+  contact:
+    name: work4all Support
+    email: support@work4all.de
+    url: https://work4all.de
+
+servers:
+  - url: https://api.work4all.de
+    description: Production
+
+components:
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      description: |
+        OAuth2 Client Credentials flow. Obtain a token from your tenant's token endpoint and
+        include it as `Authorization: Bearer <token>` in all API requests.
+      flows:
+        clientCredentials:
+          tokenUrl: /api/OAuth2/token
+          scopes: {}
+
+  schemas:
+    GraphQLRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: GraphQL query or mutation string.
+        variables:
+          type: object
+          additionalProperties: true
+          description: Variables for the query or mutation.
+        operationName:
+          type: string
+          description: Optional name of the operation to execute.
+
+    GraphQLError:
+      type: object
+      properties:
+        message:
+          type: string
+        locations:
+          type: array
+          items:
+            type: object
+            properties:
+              line:
+                type: integer
+              column:
+                type: integer
+        path:
+          type: array
+          items:
+            type: string
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+
+    FileUploadResponse:
+      type: object
+      properties:
+        fileStored:
+          type: boolean
+          description: True if the file was accepted and stored.
+        generatedObject:
+          type: string
+          description: Temporary file ID to be referenced in a subsequent mutation.
+        errorMessage:
+          type: string
+          description: Present only when fileStored is false.
+
+security:
+  - oauth2ClientCredentials: []
+
+paths:
+  /api/OAuth2/token:
+    post:
+      summary: Obtain access token
+      description: |
+        Exchange your Client ID and Client Secret for a short-lived Bearer access token
+        using the OAuth2 Client Credentials grant.
+      security: []
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - grant_type
+                - client_id
+                - client_secret
+              properties:
+                grant_type:
+                  type: string
+                  enum:
+                    - client_credentials
+                client_id:
+                  type: string
+                  description: Your OAuth2 Client ID.
+                client_secret:
+                  type: string
+                  description: Your OAuth2 Client Secret.
+      responses:
+        "200":
+          description: Access token issued successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          description: Invalid credentials or grant type.
+
+  /graphql:
+    post:
+      summary: GraphQL endpoint
+      description: |
+        Single endpoint for all data operations. Send a JSON body with `query` (or `mutation`),
+        optional `variables`, and an optional `operationName`.
+
+        Requires the `GraphQL-Require-Preflight: true` header.
+      tags:
+        - GraphQL
+      parameters:
+        - in: header
+          name: GraphQL-Require-Preflight
+          required: true
+          schema:
+            type: string
+            enum:
+              - "true"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GraphQLRequest"
+            examples:
+              createIncomingInvoice:
+                summary: Create an incoming invoice
+                value:
+                  operationName: CreateCompleteIncomingInvoice
+                  query: |
+                    mutation CreateCompleteIncomingInvoice(
+                      $input: InputCompleteIncomingInvoice!
+                      $receipts: InputErpAnhangAttachementsRelation
+                    ) {
+                      ahf_CreateCompleteIncomingInvoice(input: $input, receipts: $receipts) {
+                        code
+                        rNummer
+                        rNummerbeiLieferant
+                        datum
+                        faelligDatum
+                        eingangsDatum
+                        notiz
+                        rBetrag
+                        rMwst
+                        summe
+                        waehrungCode
+                        paymentTermDays
+                        skontoProzent
+                        skontoTg
+                        statusCode
+                        creationDate
+                        sDObjMemberCode
+                        projektCode
+                        buchungen {
+                          code
+                          sachkontoCode
+                          kostenstelleCode
+                          kostengruppeCode
+                          projektCode
+                          steuerschluessel
+                          mwst
+                          valueNet
+                          mwstBetrag
+                          anteilDM
+                          notiz
+                        }
+                        lieferant { code nummer name }
+                        projekt { code nummer name }
+                      }
+                    }
+                  variables:
+                    input:
+                      supplierCode: 1245558295
+                      invoiceNumberSupplier: "INV-2026-001"
+                      invoiceDate: "2026-01-15T00:00:00Z"
+                      entryDate: "2026-01-15T00:00:00Z"
+                      paymentTermDays: 30
+                      discount1Rate: 2
+                      discount1Days: 10
+                      currencyCode: 1
+                      note: "Q1 services"
+                      invoiceItems:
+                        - account: 4500
+                          taxRate: 19
+                          netAmount: 100.00
+                          grossAmount: 119.00
+                          vatAmount: 19.00
+                          note: "Consulting"
+                    receipts:
+                      add:
+                        - tempFileId: "abc123-temp-file-id"
+
+              createCustomer:
+                summary: Create or update a customer (upsert)
+                value:
+                  query: |
+                    mutation upsertKunde($input: InputKunde!, $relations: InputKundeRelation) {
+                      upsertKunde(input: $input, relations: $relations) {
+                        code
+                        nummer
+                        name
+                        eMail
+                        telefon
+                        strasse
+                        plz
+                        ort
+                        notiz
+                        interNet
+                        gruppe { code name }
+                      }
+                    }
+                  variables:
+                    input:
+                      firma1: "Acme GmbH"
+                      eMail: "info@acme.de"
+                      telefon: "+49 30 123456"
+                      strasse: "Hauptstraße 1"
+                      plz: "10115"
+                      ort: "Berlin"
+                      interNet: "https://acme.de"
+                    relations: {}
+
+              updateCustomer:
+                summary: Update an existing customer by code
+                value:
+                  query: |
+                    mutation upsertKunde($input: InputKunde!, $relations: InputKundeRelation) {
+                      upsertKunde(input: $input, relations: $relations) {
+                        code
+                        nummer
+                        name
+                        eMail
+                        notiz
+                      }
+                    }
+                  variables:
+                    input:
+                      code: 123456789
+                      notiz: "Updated note"
+                    relations: {}
+
+              getCustomers:
+                summary: Get a paginated list of customers
+                value:
+                  query: |
+                    query getKunden($querySize: Int, $queryPage: Int, $filter: String) {
+                      getKunden(
+                        querySize: $querySize
+                        queryPage: $queryPage
+                        querySortBy: "name"
+                        querySortOrder: ASCENDING
+                        filter: $filter
+                      ) {
+                        total
+                        size
+                        page
+                        data {
+                          code
+                          nummer
+                          name
+                          eMail
+                          telefon
+                          strasse
+                          plz
+                          ort
+                          notiz
+                          interNet
+                          privatkunde
+                          gesperrt
+                          zahlungsfrist
+                          gruppe { code name }
+                        }
+                      }
+                    }
+                  variables:
+                    querySize: 100
+                    queryPage: 1
+
+              getCustomerByCode:
+                summary: Get a single customer by internal code
+                value:
+                  query: |
+                    query getKunden($querySize: Int, $filter: String) {
+                      getKunden(querySize: $querySize, filter: $filter) {
+                        total
+                        data {
+                          code
+                          nummer
+                          name
+                          eMail
+                          telefon
+                        }
+                      }
+                    }
+                  variables:
+                    querySize: 1
+                    filter: '[{"code":{"$eq":"123456789"}}]'
+
+              getProjects:
+                summary: Get a paginated list of projects
+                value:
+                  query: |
+                    query getProjekte($querySize: Int, $queryPage: Int, $filter: String) {
+                      getProjekte(
+                        querySize: $querySize
+                        queryPage: $queryPage
+                        querySortBy: "name"
+                        querySortOrder: ASCENDING
+                        filter: $filter
+                      ) {
+                        total
+                        size
+                        page
+                        data {
+                          id: code
+                          name
+                          number: nummer
+                          startDateInner: anfangDatum
+                          endDateInner: endeDatum
+                          customerId: kundenCode
+                          customer: kunde {
+                            id: code
+                            name
+                          }
+                        }
+                      }
+                    }
+                  variables:
+                    querySize: 100
+                    queryPage: 1
+
+              getProjectByCode:
+                summary: Get a single project by internal code
+                value:
+                  query: |
+                    query getProjekte($querySize: Int, $filter: String) {
+                      getProjekte(querySize: $querySize, filter: $filter) {
+                        total
+                        data {
+                          id: code
+                          name
+                          number: nummer
+                        }
+                      }
+                    }
+                  variables:
+                    querySize: 1
+                    filter: '[{"code":{"$in":[1610906012]}}]'
+
+      responses:
+        "200":
+          description: |
+            GraphQL response. Always HTTP 200 — check the `errors` field for GraphQL-level errors.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    description: Operation result. Key depends on the mutation/query name.
+                  errors:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GraphQLError"
+        "401":
+          description: Missing or invalid Bearer token.
+
+  /api/file:
+    post:
+      summary: Upload a temporary file
+      description: |
+        Uploads a file (PDF, XML, image, etc.) to temporary storage and returns a `tempFileId`.
+        Pass this ID in the `receipts.add` array of the `ahf_CreateCompleteIncomingInvoice` mutation
+        to attach the file to an invoice.
+
+        Use `?type=TempDatei` as the query parameter.
+      tags:
+        - Files
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema:
+            type: string
+            enum:
+              - TempDatei
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - myFile
+              properties:
+                myFile:
+                  type: string
+                  format: binary
+                  description: The file to upload.
+      responses:
+        "200":
+          description: Upload result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploadResponse"
+              examples:
+                success:
+                  summary: File accepted
+                  value:
+                    fileStored: true
+                    generatedObject: "abc123-temp-file-id"
+                failure:
+                  summary: File rejected
+                  value:
+                    fileStored: false
+                    generatedObject: ""
+                    errorMessage: "Unsupported file type"
+        "401":
+          description: Missing or invalid Bearer token.
