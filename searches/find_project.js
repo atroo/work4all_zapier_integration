@@ -75,7 +75,7 @@ const perform = async (z, bundle) => {
 
   const projectCode = parseInt(bundle.inputData.project_code, 10);
   if (!projectCode || Number.isNaN(projectCode)) {
-    throw new Error('project_code must be a valid integer.');
+    throw new Error('Project Code must be a valid number.');
   }
 
   return z.request({

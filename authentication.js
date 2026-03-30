@@ -49,13 +49,16 @@ module.exports = {
       label: 'Client ID',
       required: true,
       type: 'string',
+      helpText: 'OAuth2 Client ID provided by work4all.',
     },
     {
       key: 'client_secret',
       label: 'Client Secret',
       required: true,
       type: 'password',
+      helpText: 'OAuth2 Client Secret provided by work4all.',
     },
   ],
+  connectionLabel: '{{bundle.authData.base_url}}',
   customConfig: {},
 };

@@ -39,7 +39,7 @@ const perform = async (z, bundle) => {
 
   const customerCode = parseInt(bundle.inputData.customer_code, 10);
   if (!customerCode || Number.isNaN(customerCode)) {
-    throw new Error('customer_code must be a valid integer.');
+    throw new Error('Customer Code must be a valid number.');
   }
 
   const input = { code: customerCode };
@@ -125,15 +125,15 @@ module.exports = {
         label: 'Company Name',
         type: 'string',
         required: false,
-        helpText: 'Company / firm name (Firma 1). Leave empty to keep the existing value.',
+        helpText: 'Legal company name. Leave empty to keep the existing value.',
       },
-      { key: 'eMail', label: 'Email', type: 'string', required: false },
-      { key: 'telefon', label: 'Phone', type: 'string', required: false },
-      { key: 'strasse', label: 'Street', type: 'string', required: false },
-      { key: 'plz', label: 'Postal Code', type: 'string', required: false },
-      { key: 'ort', label: 'City', type: 'string', required: false },
-      { key: 'interNet', label: 'Website', type: 'string', required: false },
-      { key: 'notiz', label: 'Note', type: 'string', required: false },
+      { key: 'eMail', label: 'Email', type: 'string', required: false, helpText: 'Primary email address. Leave empty to keep the existing value.' },
+      { key: 'telefon', label: 'Phone', type: 'string', required: false, helpText: 'Primary phone number. Leave empty to keep the existing value.' },
+      { key: 'strasse', label: 'Street', type: 'string', required: false, helpText: 'Street address including house number. Leave empty to keep the existing value.' },
+      { key: 'plz', label: 'Postal Code', type: 'string', required: false, helpText: 'Postal / ZIP code. Leave empty to keep the existing value.' },
+      { key: 'ort', label: 'City', type: 'string', required: false, helpText: 'City or town name. Leave empty to keep the existing value.' },
+      { key: 'interNet', label: 'Website', type: 'string', required: false, helpText: 'Company website URL. Leave empty to keep the existing value.' },
+      { key: 'notiz', label: 'Note', type: 'string', required: false, helpText: 'Internal note. Leave empty to keep the existing value.' },
     ],
   },
 };

@@ -329,7 +329,7 @@ module.exports = {
       eingangsDatum: '2026-02-16T23:00:00.000Z',
       faelligDatum: '2026-02-23T23:00:00.000Z',
       buchungsDatum: null,
-      notiz: 'Eingangsrechnungs-Notiz',
+      notiz: 'Internal invoice note',
       sDObjMemberCode: 1245558295,
       projektCode: 1610906012,
       rBetrag: 219.0,
@@ -404,7 +404,7 @@ module.exports = {
     inputFields: [
       {
         key: 'invoice_data_json',
-        label: 'Invoice Data (JSON)',
+        label: 'Invoice Data',
         helpText:
           'Provide all invoice data as a single JSON object — ideal for LLM output. ' +
           'When filled, all individual fields below are ignored. ' +
@@ -551,7 +551,7 @@ module.exports = {
       },
       {
         key: 'invoice_items',
-        label: 'Invoice Line Items (JSON)',
+        label: 'Invoice Line Items',
         helpText:
           'Optional list of invoice positions as a JSON array. Each item may contain: ' +
           'account (Int), costCenter (Int), costGroup (Int), projectCode (Int), ' +
@@ -576,8 +576,7 @@ module.exports = {
     ],
   },
   display: {
-    description:
-      'Creates a complete incoming invoice in a single atomic call using ahf_CreateCompleteIncomingInvoice.',
+    description: 'Creates a complete incoming invoice in work4all.',
     hidden: false,
     label: 'Create Invoice',
   },

@@ -139,7 +139,7 @@ module.exports = {
       },
       {
         key: 'filter',
-        label: 'Filter (JSON)',
+        label: 'Filter',
         type: 'text',
         required: false,
         helpText:

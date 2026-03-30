@@ -28,7 +28,7 @@ describe('project – input validation', () => {
   it('find_project throws when project_code is missing', async () => {
     await expect(
       appTester(findProjectPerform, makeBundle({})),
-    ).rejects.toThrow('project_code');
+    ).rejects.toThrow('Project Code must be a valid number');
   });
 });
 

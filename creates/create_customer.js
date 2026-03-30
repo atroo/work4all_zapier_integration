@@ -46,7 +46,7 @@ const perform = async (z, bundle) => {
   }
 
   if (!input.firma1) {
-    throw new Error('Company Name (firma1) is required to create a customer.');
+    throw new Error('Company Name is required to create a customer.');
   }
 
   return z.request({
@@ -117,15 +117,15 @@ module.exports = {
         label: 'Company Name',
         type: 'string',
         required: true,
-        helpText: 'Company / firm name (Firma 1).',
+        helpText: 'Legal company name.',
       },
-      { key: 'eMail', label: 'Email', type: 'string', required: false },
-      { key: 'telefon', label: 'Phone', type: 'string', required: false },
-      { key: 'strasse', label: 'Street', type: 'string', required: false },
-      { key: 'plz', label: 'Postal Code', type: 'string', required: false },
-      { key: 'ort', label: 'City', type: 'string', required: false },
-      { key: 'interNet', label: 'Website', type: 'string', required: false },
-      { key: 'notiz', label: 'Note', type: 'string', required: false },
+      { key: 'eMail', label: 'Email', type: 'string', required: false, helpText: 'Primary email address of the company.' },
+      { key: 'telefon', label: 'Phone', type: 'string', required: false, helpText: 'Primary phone number.' },
+      { key: 'strasse', label: 'Street', type: 'string', required: false, helpText: 'Street address including house number.' },
+      { key: 'plz', label: 'Postal Code', type: 'string', required: false, helpText: 'Postal / ZIP code.' },
+      { key: 'ort', label: 'City', type: 'string', required: false, helpText: 'City or town name.' },
+      { key: 'interNet', label: 'Website', type: 'string', required: false, helpText: 'Company website URL.' },
+      { key: 'notiz', label: 'Note', type: 'string', required: false, helpText: 'Internal note about this customer.' },
     ],
   },
 };

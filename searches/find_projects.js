@@ -158,7 +158,7 @@ module.exports = {
       },
       {
         key: 'filter',
-        label: 'Filter (JSON)',
+        label: 'Filter',
         type: 'text',
         required: false,
         helpText: 'Optional filter as a JSON array, e.g. [{"name":{"$eq":"My Project"}}]',

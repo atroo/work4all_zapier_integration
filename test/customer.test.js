@@ -28,19 +28,19 @@ describe('customer – input validation', () => {
   it('create_customer throws when firma1 is missing', async () => {
     await expect(
       appTester(createCustomerPerform, makeBundle({ eMail: 'test@example.com' })),
-    ).rejects.toThrow('firma1');
+    ).rejects.toThrow('Company Name is required');
   });
 
   it('update_customer throws when customer_code is missing', async () => {
     await expect(
       appTester(updateCustomerPerform, makeBundle({ firma1: 'Test GmbH' })),
-    ).rejects.toThrow('customer_code');
+    ).rejects.toThrow('Customer Code must be a valid number');
   });
 
   it('find_customer throws when customer_code is missing', async () => {
     await expect(
       appTester(findCustomerPerform, makeBundle({})),
-    ).rejects.toThrow('customer_code');
+    ).rejects.toThrow('Customer Code must be a valid number');
   });
 });
 

@@ -1,7 +1,7 @@
 {
-  "name": "work-4-all",
-  "version": "0.1.1",
-  "description": "work4all: Die digitale Schaltzentrale für kleine und mittlere Unternehmen.",
+  "name": "work4all",
+  "version": "1.0.0",
+  "description": "work4all: The digital control center for small and medium-sized businesses.",
   "main": "index.js",
   "scripts": {
     "test": "jest --testTimeout 10000"
